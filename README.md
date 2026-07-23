@@ -28,6 +28,21 @@ Unlike traditional test management tools, Signal implements a robust versioning 
 - **Storage**: MinIO (S3-compatible)
 - **Architecture**: Turborepo monorepo
 
+## Deployment
+
+Signal is deployed on your own VPS using **Ansible**, **Docker**, and **GitHub Actions**.
+
+**Quick deploy:**
+```bash
+# 1. Setup server (run once)
+make ansible
+
+# 2. Push to main - GitHub Actions handles the rest
+git push origin main
+```
+
+See [deploy/README.md](deploy/README.md) for detailed setup instructions.
+
 ## Port Configuration (Pool: 11000-11100)
 
 | Service | Port | Description |

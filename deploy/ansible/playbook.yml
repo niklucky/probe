@@ -1,0 +1,253 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: Setup Signal Application Server
+  hosts: signal
+  become: true
+  vars:
+    app_name: signal
+    domain: signal.hgdev.me
+    app_user: signal
+    app_dir: /opt/signal
+    docker_network: signal-network
+
+  tasks:
+    # Update system packages
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+
+    # Install essential packages
+    - name: Install essential packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - vim
+          - htop
+          - tmux
+          - ufw
+          - fail2ban
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    # Install Docker
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    # Add user to docker group
+    - name: Add deploy user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+      when: ansible_user is defined
+
+    # Create app user and directories
+    - name: Create signal user
+      user:
+        name: "{{ app_user }}"
+        system: yes
+        shell: /bin/bash
+        home: "/home/{{ app_user }}"
+        createhome: yes
+
+    - name: Create app directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+      loop:
+        - "{{ app_dir }}"
+        - "{{ app_dir }}/data"
+        - "{{ app_dir }}/data/postgres"
+        - "{{ app_dir }}/data/minio"
+
+    # Configure firewall
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: Allow HTTP
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    # Configure Nginx
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Create nginx configuration for Signal
+      template:
+        src: nginx-signal.conf.j2
+        dest: /etc/nginx/sites-available/signal
+        mode: '0644'
+      vars:
+        domain: "{{ domain }}"
+        api_port: 11010
+        web_port: 11020
+
+    - name: Enable Signal nginx site
+      file:
+        src: /etc/nginx/sites-available/signal
+        dest: /etc/nginx/sites-enabled/signal
+        state: link
+
+    - name: Test nginx configuration
+      command: nginx -t
+      changed_when: false
+
+    - name: Restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    # Configure fail2ban
+    - name: Configure fail2ban for SSH
+      copy:
+        content: |
+          [sshd]
+          enabled = true
+          port = ssh
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 3
+          bantime = 3600
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+
+    - name: Start and enable fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    # Setup log rotation for Docker
+    - name: Configure Docker daemon for log rotation
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          }
+        dest: /etc/docker/daemon.json
+        mode: '0644'
+      notify: Restart Docker
+
+    # Create deployment script
+    - name: Create deploy script
+      copy:
+        content: |
+          #!/bin/bash
+          set -e
+          
+          APP_DIR="{{ app_dir }}"
+          cd "$APP_DIR"
+          
+          echo "Pulling latest images..."
+          docker compose pull
+          
+          echo "Starting services..."
+          docker compose up -d
+          
+          echo "Cleaning up old images..."
+          docker image prune -f
+          
+          echo "Deployment complete!"
+        dest: "{{ app_dir }}/deploy.sh"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+
+    # Create .env file template
+    - name: Create production .env template
+      copy:
+        content: |
+          # Database
+          DATABASE_URL=postgres://signal:${POSTGRES_PASSWORD}@postgres:5432/signal_db
+          POSTGRES_USER=signal
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_DB=signal_db
+          
+          # JWT
+          JWT_SECRET=${JWT_SECRET}
+          
+          # API
+          PORT=11010
+          FRONTEND_URL=https://{{ domain }}
+          
+          # MinIO
+          MINIO_ENDPOINT=minio
+          MINIO_PORT=9000
+          MINIO_USE_SSL=false
+          MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+          MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+          MINIO_BUCKET=signal-assets
+          MINIO_PUBLIC_URL=https://{{ domain }}/minio
+          
+          # Web
+          VITE_API_URL=https://{{ domain }}/api
+        dest: "{{ app_dir }}/.env.example"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0600'
+
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted
