@@ -23,7 +23,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { FileUpload } from '@/components/file-upload';
 import { 
   ArrowLeft, 
-  Play,
   CheckCircle,
   XCircle,
   SkipForward,
@@ -31,7 +30,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Flag,
-  BarChart3,
   Paperclip
 } from 'lucide-react';
 

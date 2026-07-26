@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
-import { db, teams, teamMembers, users, eq, and } from '@signal/db';
+import { db, teams, teamMembers, users, eq, and } from '@probe/db';
 import { TRPCError } from '@trpc/server';
 
 export const teamsRouter = router({
@@ -17,6 +17,7 @@ export const teamsRouter = router({
                   id: true,
                   name: true,
                   email: true,
+                  avatarUrl: true,
                 },
               },
             },

@@ -1,5 +1,5 @@
 {
-  "name": "@signal/api",
+  "name": "@probe/api",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -12,8 +12,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@hono/trpc-server": "^0.4.2",
-    "@signal/db": "*",
-    "@signal/trpc": "*",
+    "@probe/db": "*",
+    "@probe/trpc": "*",
     "@trpc/server": "^11.0.0-rc.638",
     "hono": "^4.6.12",
     "jsonwebtoken": "^9.0.2",
@@ -22,7 +22,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@signal/typescript-config": "*",
+    "@probe/typescript-config": "*",
     "@types/bun": "latest",
     "@types/jsonwebtoken": "^9.0.7",
     "typescript": "^5.6.3"

@@ -1,5 +1,5 @@
 {
-  "name": "@signal/web",
+  "name": "@probe/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -20,8 +20,8 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.1",
     "@radix-ui/react-toast": "^1.2.2",
-    "@signal/shared": "*",
-    "@signal/trpc": "*",
+    "@probe/shared": "*",
+    "@probe/trpc": "*",
     "@tanstack/react-query": "^5.62.0",
     "@trpc/client": "^11.0.0-rc.638",
     "@trpc/react-query": "^11.0.0-rc.638",

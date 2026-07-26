@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { 
   Package, 
   Users, 
@@ -52,7 +53,7 @@ export function ProjectPage() {
     { enabled: !!id }
   );
 
-  const { data: products, refetch: refetchProducts } = trpc.products.list.useQuery(
+  const { data: products } = trpc.products.list.useQuery(
     { projectId: id },
     { enabled: !!id }
   );
@@ -132,7 +133,7 @@ export function ProjectPage() {
     }
   };
 
-  const openEditProductDialog = (product: typeof products extends Array<infer T> ? T : never) => {
+  const openEditProductDialog = (product: NonNullable<typeof products>[number]) => {
     setEditingProduct({
       id: product.id,
       name: product.name,
@@ -227,8 +228,8 @@ export function ProjectPage() {
             <div className="text-2xl font-bold">{products?.length || 0}</div>
           </CardContent>
         </Card>
-        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" asChild>
-          <Link to={`/projects/${projectId}/runs`}>
+        <Link to={`/projects/${projectId}/runs`}>
+          <Card className="cursor-pointer hover:bg-accent/50 transition-colors">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Test Runs</CardTitle>
               <Play className="h-4 w-4 text-muted-foreground" />
@@ -236,8 +237,8 @@ export function ProjectPage() {
             <CardContent>
               <div className="text-2xl font-bold">{testRuns?.length || 0}</div>
             </CardContent>
-          </Link>
-        </Card>
+          </Card>
+        </Link>
       </div>
 
       {/* Create Product Dialog */}

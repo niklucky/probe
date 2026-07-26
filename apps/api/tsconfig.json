@@ -1,5 +1,5 @@
 {
-  "extends": "@signal/typescript-config/base.json",
+  "extends": "@probe/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src"

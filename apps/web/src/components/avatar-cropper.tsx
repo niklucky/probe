@@ -212,7 +212,7 @@ interface AvatarUploadProps {
   onAvatarChange: (file: File) => void;
 }
 
-export function AvatarUpload({ currentAvatar, onAvatarChange }: AvatarUploadProps) {
+export function AvatarUpload({ onAvatarChange }: AvatarUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isCropperOpen, setIsCropperOpen] = useState(false);
 

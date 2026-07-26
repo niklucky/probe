@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import type { User } from '@signal/shared';
+import type { User } from '@probe/shared';
 import { trpc } from '@/lib/trpc';
 
 interface AuthContextType {

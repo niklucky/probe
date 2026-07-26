@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, publicProcedure, protectedProcedure } from '../trpc';
-import { db, users, eq } from '@signal/db';
+import { db, users, eq } from '@probe/db';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { TRPCError } from '@trpc/server';

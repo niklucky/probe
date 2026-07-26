@@ -1,5 +1,5 @@
 {
-  "name": "@signal/db",
+  "name": "@probe/db",
   "version": "0.0.0",
   "private": true,
   "main": "./src/index.ts",
@@ -17,7 +17,7 @@
     "postgres": "^3.4.5"
   },
   "devDependencies": {
-    "@signal/typescript-config": "*",
+    "@probe/typescript-config": "*",
     "drizzle-kit": "^0.30.0",
     "typescript": "^5.6.3"
   }

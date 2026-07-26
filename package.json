@@ -1,5 +1,5 @@
 {
-  "name": "signal",
+  "name": "probe",
   "private": true,
   "scripts": {
     "build": "turbo build",

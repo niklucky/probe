@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
-import { db, files, eq, and, desc } from '@signal/db';
+import { db, files, eq, and, desc } from '@probe/db';
 import { Client } from 'minio';
 import { TRPCError } from '@trpc/server';
 
@@ -8,10 +8,12 @@ const minioClient = new Client({
   endPoint: process.env.MINIO_ENDPOINT || 'localhost',
   port: parseInt(process.env.MINIO_PORT || '11002'),
   useSSL: false,
+  // Preserve the legacy local credentials so existing MinIO data remains accessible.
   accessKey: process.env.MINIO_ACCESS_KEY || 'signal',
   secretKey: process.env.MINIO_SECRET_KEY || 'signal_password',
 });
 
+// Preserve the legacy local bucket name; see README migration notes.
 const BUCKET_NAME = process.env.MINIO_BUCKET || 'signal-assets';
 
 export const filesRouter = router({

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,7 +37,6 @@ import {
 
 export function TeamsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
   const projectIdNum = Number(projectId);
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);

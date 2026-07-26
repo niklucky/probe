@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import {
@@ -44,8 +44,6 @@ import {
 
 export function TestSuitePage() {
   const { projectId, productId, suiteId } = useParams<{ projectId: string; productId: string; suiteId: string }>();
-  const navigate = useNavigate();
-  
   // Create Dialog State
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newTestCase, setNewTestCase] = useState({
@@ -171,7 +169,7 @@ export function TestSuitePage() {
   };
 
   // Edit form handlers
-  const openEditDialog = (testCase: typeof testCases extends Array<infer T> ? T : never) => {
+  const openEditDialog = (testCase: NonNullable<typeof testCases>[number]) => {
     const currentVersion = testCase.currentVersion || testCase.versions?.[0];
     if (!currentVersion) return;
     

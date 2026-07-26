@@ -1,4 +1,4 @@
 {
-  "extends": "@signal/typescript-config/base.json",
+  "extends": "@probe/typescript-config/base.json",
   "include": ["src"]
 }
