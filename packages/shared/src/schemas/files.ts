@@ -16,10 +16,20 @@ export const publicFileSchema = createSelectSchema(files).pick({
   createdById: true,
   createdAt: true,
 });
-export const getUploadUrlInputSchema = z.object({
-  filename: z.string().min(1),
-  contentType: z.string().min(1),
-});
+export const getUploadUrlInputSchema = z.discriminatedUnion('purpose', [
+  z.object({
+    purpose: z.literal('profile_avatar'),
+    filename: z.string().min(1),
+    contentType: z.string().min(1),
+  }),
+  z.object({
+    purpose: z.literal('attachment'),
+    filename: z.string().min(1),
+    contentType: z.string().min(1),
+    entityType: z.enum(['test_case_version', 'test_result']),
+    entityId: z.number().int().positive(),
+  }),
+]);
 export const saveFileInputSchema = fileInsertSchema
   .pick({
     entityType: true,

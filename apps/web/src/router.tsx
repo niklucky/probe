@@ -12,6 +12,7 @@ import { TestRunCreatePage } from '@/pages/test-run-create';
 import { TestRunExecutePage } from '@/pages/test-run-execute';
 import { TestRunResultsPage } from '@/pages/test-run-results';
 import { TeamsPage } from '@/pages/teams';
+import { EnvironmentsPage } from '@/pages/environments';
 import { ProtectedRoute } from '@/components/protected-route';
 
 export const router = createBrowserRouter([
@@ -46,6 +47,10 @@ export const router = createBrowserRouter([
       {
         path: 'projects/:projectId/teams',
         element: <TeamsPage />,
+      },
+      {
+        path: 'projects/:projectId/environments',
+        element: <EnvironmentsPage />,
       },
       {
         path: 'projects/:projectId/products/:productId',

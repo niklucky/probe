@@ -1,12 +1,57 @@
-import { pgEnum, pgTable, serial, varchar, text, timestamp, integer, jsonb, index } from 'drizzle-orm/pg-core';
+import {
+  pgEnum,
+  pgTable,
+  serial,
+  varchar,
+  text,
+  timestamp,
+  integer,
+  jsonb,
+  index,
+  boolean,
+} from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
-export const userRoleEnum = pgEnum('user_role', ['admin', 'qa', 'manual_tester', 'viewer']);
-export const productTypeEnum = pgEnum('product_type', ['website', 'mobile_app', 'server', 'api', 'desktop_app', 'other']);
-export const testPriorityEnum = pgEnum('test_priority', ['low', 'medium', 'high', 'critical']);
-export const testStatusEnum = pgEnum('test_status', ['draft', 'ready', 'deprecated']);
-export const resultStatusEnum = pgEnum('result_status', ['passed', 'failed', 'skipped', 'blocked', 'not_run']);
+export const userRoleEnum = pgEnum('user_role', [
+  'admin',
+  'qa',
+  'manual_tester',
+  'viewer',
+]);
+export const productTypeEnum = pgEnum('product_type', [
+  'website',
+  'mobile_app',
+  'server',
+  'api',
+  'desktop_app',
+  'other',
+]);
+export const testPriorityEnum = pgEnum('test_priority', [
+  'low',
+  'medium',
+  'high',
+  'critical',
+]);
+export const testStatusEnum = pgEnum('test_status', [
+  'draft',
+  'ready',
+  'deprecated',
+]);
+export const resultStatusEnum = pgEnum('result_status', [
+  'passed',
+  'failed',
+  'skipped',
+  'blocked',
+  'not_run',
+]);
+export const environmentTypeEnum = pgEnum('environment_type', [
+  'local',
+  'development',
+  'staging',
+  'production',
+  'custom',
+]);
 
 // Users table
 export const users = pgTable('users', {
@@ -31,7 +76,9 @@ export const projects = pgTable('projects', {
   description: text('description'),
   logoUrl: varchar('logo_url', { length: 500 }),
   website: varchar('website', { length: 500 }),
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
+  createdById: integer('created_by_id')
+    .references(() => users.id)
+    .notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -39,7 +86,9 @@ export const projects = pgTable('projects', {
 // Products table (belongs to project)
 export const products = pgTable('products', {
   id: serial('id').primaryKey(),
-  projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
+  projectId: integer('project_id')
+    .references(() => projects.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   type: productTypeEnum('type').notNull(),
   description: text('description'),
@@ -47,133 +96,253 @@ export const products = pgTable('products', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Network targets used for authoring and, later, controlled browser automation.
+// Credentials deliberately do not belong here or in test case text.
+export const environments = pgTable(
+  'environments',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => projects.id, { onDelete: 'cascade' })
+      .notNull(),
+    productId: integer('product_id').references(() => products.id, {
+      onDelete: 'cascade',
+    }),
+    name: varchar('name', { length: 255 }).notNull(),
+    type: environmentTypeEnum('type').notNull(),
+    baseUrl: varchar('base_url', { length: 2048 }).notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    projectIndex: index('environments_project_index').on(table.projectId),
+    productIndex: index('environments_product_index').on(table.productId),
+  }),
+);
+
 // Teams table
 export const teams = pgTable('teams', {
   id: serial('id').primaryKey(),
-  projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
+  projectId: integer('project_id')
+    .references(() => projects.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Team members (junction table)
-export const teamMembers = pgTable('team_members', {
-  id: serial('id').primaryKey(),
-  teamId: integer('team_id').references(() => teams.id, { onDelete: 'cascade' }).notNull(),
-  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  role: userRoleEnum('role').notNull().default('viewer'),
-  invitedAt: timestamp('invited_at').defaultNow().notNull(),
-  joinedAt: timestamp('joined_at'),
-}, (table) => ({
-  uniqueMember: index('unique_team_member').on(table.teamId, table.userId),
-}));
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id')
+      .references(() => teams.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: integer('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: userRoleEnum('role').notNull().default('viewer'),
+    invitedAt: timestamp('invited_at').defaultNow().notNull(),
+    joinedAt: timestamp('joined_at'),
+  },
+  (table) => ({
+    uniqueMember: index('unique_team_member').on(table.teamId, table.userId),
+  }),
+);
 
 // Test suites with versioning - now linked to products instead of projects
 export const testSuites = pgTable('test_suites', {
   id: serial('id').primaryKey(),
-  productId: integer('product_id').references(() => products.id, { onDelete: 'cascade' }).notNull(),
+  productId: integer('product_id')
+    .references(() => products.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
   currentVersionId: integer('current_version_id'), // References test_suite_versions
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
+  createdById: integer('created_by_id')
+    .references(() => users.id)
+    .notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Test suite versions
-export const testSuiteVersions = pgTable('test_suite_versions', {
-  id: serial('id').primaryKey(),
-  suiteId: integer('suite_id').references(() => testSuites.id, { onDelete: 'cascade' }).notNull(),
-  versionNumber: integer('version_number').notNull(),
-  name: varchar('name', { length: 255 }).notNull(),
-  description: text('description'),
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
-  uniqueVersion: index('unique_suite_version').on(table.suiteId, table.versionNumber),
-}));
+export const testSuiteVersions = pgTable(
+  'test_suite_versions',
+  {
+    id: serial('id').primaryKey(),
+    suiteId: integer('suite_id')
+      .references(() => testSuites.id, { onDelete: 'cascade' })
+      .notNull(),
+    versionNumber: integer('version_number').notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueVersion: index('unique_suite_version').on(
+      table.suiteId,
+      table.versionNumber,
+    ),
+  }),
+);
 
 // Test cases with versioning
 export const testCases = pgTable('test_cases', {
   id: serial('id').primaryKey(),
-  suiteId: integer('suite_id').references(() => testSuites.id, { onDelete: 'cascade' }).notNull(),
+  suiteId: integer('suite_id')
+    .references(() => testSuites.id, { onDelete: 'cascade' })
+    .notNull(),
   currentVersionId: integer('current_version_id'), // References test_case_versions
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
+  createdById: integer('created_by_id')
+    .references(() => users.id)
+    .notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Test case versions
-export const testCaseVersions = pgTable('test_case_versions', {
-  id: serial('id').primaryKey(),
-  testCaseId: integer('test_case_id').references(() => testCases.id, { onDelete: 'cascade' }).notNull(),
-  suiteVersionId: integer('suite_version_id').references(() => testSuiteVersions.id, { onDelete: 'cascade' }).notNull(),
-  versionNumber: integer('version_number').notNull(),
-  title: varchar('title', { length: 500 }).notNull(),
-  description: text('description'),
-  steps: jsonb('steps').$type<string[]>().notNull().default([]),
-  expectedResult: text('expected_result'),
-  priority: testPriorityEnum('priority').notNull().default('medium'),
-  status: testStatusEnum('status').notNull().default('draft'),
-  tags: jsonb('tags').$type<string[]>().notNull().default([]),
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
-  uniqueVersion: index('unique_test_case_version').on(table.testCaseId, table.versionNumber),
-}));
+export const testCaseVersions = pgTable(
+  'test_case_versions',
+  {
+    id: serial('id').primaryKey(),
+    testCaseId: integer('test_case_id')
+      .references(() => testCases.id, { onDelete: 'cascade' })
+      .notNull(),
+    suiteVersionId: integer('suite_version_id')
+      .references(() => testSuiteVersions.id, { onDelete: 'cascade' })
+      .notNull(),
+    versionNumber: integer('version_number').notNull(),
+    title: varchar('title', { length: 500 }).notNull(),
+    description: text('description'),
+    prerequisites: jsonb('prerequisites')
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    steps: jsonb('steps')
+      .$type<
+        Array<
+          | string
+          | {
+              action: string;
+              expectedResult?: string;
+            }
+        >
+      >()
+      .notNull()
+      .default([]),
+    expectedResult: text('expected_result').notNull().default(''),
+    priority: testPriorityEnum('priority').notNull().default('medium'),
+    status: testStatusEnum('status').notNull().default('draft'),
+    tags: jsonb('tags').$type<string[]>().notNull().default([]),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueVersion: index('unique_test_case_version').on(
+      table.testCaseId,
+      table.versionNumber,
+    ),
+  }),
+);
 
 // Test runs
 export const testRuns = pgTable('test_runs', {
   id: serial('id').primaryKey(),
-  projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }).notNull(),
+  projectId: integer('project_id')
+    .references(() => projects.id, { onDelete: 'cascade' })
+    .notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
-  executedById: integer('executed_by_id').references(() => users.id).notNull(),
+  executedById: integer('executed_by_id')
+    .references(() => users.id)
+    .notNull(),
   startedAt: timestamp('started_at').defaultNow().notNull(),
   completedAt: timestamp('completed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Test run items (which test case versions are in the run)
-export const testRunItems = pgTable('test_run_items', {
-  id: serial('id').primaryKey(),
-  runId: integer('run_id').references(() => testRuns.id, { onDelete: 'cascade' }).notNull(),
-  testCaseVersionId: integer('test_case_version_id').references(() => testCaseVersions.id, { onDelete: 'cascade' }).notNull(),
-  orderIndex: integer('order_index').notNull(),
-}, (table) => ({
-  uniqueItem: index('unique_run_item').on(table.runId, table.testCaseVersionId),
-}));
+export const testRunItems = pgTable(
+  'test_run_items',
+  {
+    id: serial('id').primaryKey(),
+    runId: integer('run_id')
+      .references(() => testRuns.id, { onDelete: 'cascade' })
+      .notNull(),
+    testCaseVersionId: integer('test_case_version_id')
+      .references(() => testCaseVersions.id, { onDelete: 'cascade' })
+      .notNull(),
+    orderIndex: integer('order_index').notNull(),
+  },
+  (table) => ({
+    uniqueItem: index('unique_run_item').on(
+      table.runId,
+      table.testCaseVersionId,
+    ),
+  }),
+);
 
 // Test results
-export const testResults = pgTable('test_results', {
-  id: serial('id').primaryKey(),
-  runId: integer('run_id').references(() => testRuns.id, { onDelete: 'cascade' }).notNull(),
-  testCaseVersionId: integer('test_case_version_id').references(() => testCaseVersions.id, { onDelete: 'cascade' }).notNull(),
-  status: resultStatusEnum('status').notNull().default('not_run'),
-  notes: text('notes'),
-  executedById: integer('executed_by_id').references(() => users.id),
-  executedAt: timestamp('executed_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => ({
-  uniqueResult: index('unique_test_result').on(table.runId, table.testCaseVersionId),
-}));
+export const testResults = pgTable(
+  'test_results',
+  {
+    id: serial('id').primaryKey(),
+    runId: integer('run_id')
+      .references(() => testRuns.id, { onDelete: 'cascade' })
+      .notNull(),
+    testCaseVersionId: integer('test_case_version_id')
+      .references(() => testCaseVersions.id, { onDelete: 'cascade' })
+      .notNull(),
+    status: resultStatusEnum('status').notNull().default('not_run'),
+    notes: text('notes'),
+    executedById: integer('executed_by_id').references(() => users.id),
+    executedAt: timestamp('executed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueResult: index('unique_test_result').on(
+      table.runId,
+      table.testCaseVersionId,
+    ),
+  }),
+);
 
 // File attachments for test cases and test results
-export const files = pgTable('files', {
-  id: serial('id').primaryKey(),
-  entityType: varchar('entity_type', { length: 50 }).notNull(), // 'test_case_version' or 'test_result'
-  entityId: integer('entity_id').notNull(),
-  filename: varchar('filename', { length: 500 }).notNull(), // Stored filename in MinIO
-  originalName: varchar('original_name', { length: 500 }).notNull(),
-  mimeType: varchar('mime_type', { length: 100 }).notNull(),
-  size: integer('size').notNull(), // File size in bytes
-  url: varchar('url', { length: 1000 }).notNull(),
-  createdById: integer('created_by_id').references(() => users.id).notNull(),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => ({
-  entityIndex: index('files_entity_index').on(table.entityType, table.entityId),
-}));
+export const files = pgTable(
+  'files',
+  {
+    id: serial('id').primaryKey(),
+    entityType: varchar('entity_type', { length: 50 }).notNull(), // 'test_case_version' or 'test_result'
+    entityId: integer('entity_id').notNull(),
+    filename: varchar('filename', { length: 500 }).notNull(), // Stored filename in MinIO
+    originalName: varchar('original_name', { length: 500 }).notNull(),
+    mimeType: varchar('mime_type', { length: 100 }).notNull(),
+    size: integer('size').notNull(), // File size in bytes
+    url: varchar('url', { length: 1000 }).notNull(),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    entityIndex: index('files_entity_index').on(
+      table.entityType,
+      table.entityId,
+    ),
+  }),
+);
 
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
@@ -191,6 +360,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   products: many(products),
   teams: many(teams),
+  environments: many(environments),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
@@ -199,6 +369,22 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     references: [projects.id],
   }),
   testSuites: many(testSuites),
+  environments: many(environments),
+}));
+
+export const environmentsRelations = relations(environments, ({ one }) => ({
+  project: one(projects, {
+    fields: [environments.projectId],
+    references: [projects.id],
+  }),
+  product: one(products, {
+    fields: [environments.productId],
+    references: [products.id],
+  }),
+  createdBy: one(users, {
+    fields: [environments.createdById],
+    references: [users.id],
+  }),
 }));
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
@@ -233,17 +419,20 @@ export const testSuitesRelations = relations(testSuites, ({ one, many }) => ({
   testCases: many(testCases),
 }));
 
-export const testSuiteVersionsRelations = relations(testSuiteVersions, ({ one, many }) => ({
-  suite: one(testSuites, {
-    fields: [testSuiteVersions.suiteId],
-    references: [testSuites.id],
+export const testSuiteVersionsRelations = relations(
+  testSuiteVersions,
+  ({ one, many }) => ({
+    suite: one(testSuites, {
+      fields: [testSuiteVersions.suiteId],
+      references: [testSuites.id],
+    }),
+    createdBy: one(users, {
+      fields: [testSuiteVersions.createdById],
+      references: [users.id],
+    }),
+    testCases: many(testCaseVersions),
   }),
-  createdBy: one(users, {
-    fields: [testSuiteVersions.createdById],
-    references: [users.id],
-  }),
-  testCases: many(testCaseVersions),
-}));
+);
 
 export const testCasesRelations = relations(testCases, ({ one, many }) => ({
   suite: one(testSuites, {
@@ -257,23 +446,26 @@ export const testCasesRelations = relations(testCases, ({ one, many }) => ({
   versions: many(testCaseVersions),
 }));
 
-export const testCaseVersionsRelations = relations(testCaseVersions, ({ one, many }) => ({
-  testCase: one(testCases, {
-    fields: [testCaseVersions.testCaseId],
-    references: [testCases.id],
+export const testCaseVersionsRelations = relations(
+  testCaseVersions,
+  ({ one, many }) => ({
+    testCase: one(testCases, {
+      fields: [testCaseVersions.testCaseId],
+      references: [testCases.id],
+    }),
+    suiteVersion: one(testSuiteVersions, {
+      fields: [testCaseVersions.suiteVersionId],
+      references: [testSuiteVersions.id],
+    }),
+    createdBy: one(users, {
+      fields: [testCaseVersions.createdById],
+      references: [users.id],
+    }),
+    runItems: many(testRunItems),
+    results: many(testResults),
+    files: many(files),
   }),
-  suiteVersion: one(testSuiteVersions, {
-    fields: [testCaseVersions.suiteVersionId],
-    references: [testSuiteVersions.id],
-  }),
-  createdBy: one(users, {
-    fields: [testCaseVersions.createdById],
-    references: [users.id],
-  }),
-  runItems: many(testRunItems),
-  results: many(testResults),
-  files: many(files),
-}));
+);
 
 export const testRunsRelations = relations(testRuns, ({ one, many }) => ({
   project: one(projects, {

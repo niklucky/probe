@@ -30,9 +30,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { 
-  Package, 
-  Users, 
+import {
+  Package,
+  Users,
   Play,
   Settings,
   ArrowLeft,
@@ -40,7 +40,7 @@ import {
   MoreVertical,
   Edit,
   Trash2,
-  CheckCircle
+  CheckCircle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -48,24 +48,22 @@ export function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
 
-  const { data: project, isLoading: isLoadingProject } = trpc.projects.get.useQuery(
-    { id },
-    { enabled: !!id }
-  );
+  const { data: project, isLoading: isLoadingProject } =
+    trpc.projects.get.useQuery({ id }, { enabled: !!id });
 
   const { data: products } = trpc.products.list.useQuery(
     { projectId: id },
-    { enabled: !!id }
+    { enabled: !!id },
   );
 
   const { data: teams } = trpc.teams.list.useQuery(
     { projectId: id },
-    { enabled: !!id }
+    { enabled: !!id },
   );
 
   const { data: testRuns } = trpc.testRuns.list.useQuery(
     { projectId: id },
-    { enabled: !!id }
+    { enabled: !!id },
   );
 
   // Create Product Dialog State
@@ -133,7 +131,9 @@ export function ProjectPage() {
     }
   };
 
-  const openEditProductDialog = (product: NonNullable<typeof products>[number]) => {
+  const openEditProductDialog = (
+    product: NonNullable<typeof products>[number],
+  ) => {
     setEditingProduct({
       id: product.id,
       name: product.name,
@@ -164,7 +164,8 @@ export function ProjectPage() {
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold">Project not found</h2>
         <p className="text-muted-foreground mt-2">
-          The project you're looking for doesn't exist or you don't have access to it.
+          The project you're looking for doesn't exist or you don't have access
+          to it.
         </p>
         <Button className="mt-4" asChild>
           <Link to="/">
@@ -182,18 +183,24 @@ export function ProjectPage() {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/" className="hover:text-foreground">Projects</Link>
+            <Link to="/" className="hover:text-foreground">
+              Projects
+            </Link>
             <span>/</span>
             <span>{project.name}</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
           {project.description && (
-            <p className="text-muted-foreground max-w-2xl">{project.description}</p>
+            <p className="text-muted-foreground max-w-2xl">
+              {project.description}
+            </p>
           )}
         </div>
-        <Button variant="outline" size="sm">
-          <Settings className="mr-2 h-4 w-4" />
-          Settings
+        <Button variant="outline" size="sm" asChild>
+          <Link to={`/projects/${projectId}/environments`}>
+            <Settings className="mr-2 h-4 w-4" />
+            Environments
+          </Link>
         </Button>
       </div>
 
@@ -215,7 +222,10 @@ export function ProjectPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {teams?.reduce((acc, team) => acc + (team.members?.length || 0), 0) || 0}
+              {teams?.reduce(
+                (acc, team) => acc + (team.members?.length || 0),
+                0,
+              ) || 0}
             </div>
           </CardContent>
         </Card>
@@ -248,7 +258,8 @@ export function ProjectPage() {
             <DialogHeader>
               <DialogTitle>Add Product</DialogTitle>
               <DialogDescription>
-                Add a new product to this project (website, mobile app, API, etc.)
+                Add a new product to this project (website, mobile app, API,
+                etc.)
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -258,7 +269,9 @@ export function ProjectPage() {
                   id="product-name"
                   placeholder="e.g., Main Website"
                   value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                  onChange={(e) =>
+                    setNewProduct({ ...newProduct, name: e.target.value })
+                  }
                   required
                 />
               </div>
@@ -268,7 +281,12 @@ export function ProjectPage() {
                   id="product-type"
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                   value={newProduct.type}
-                  onChange={(e) => setNewProduct({ ...newProduct, type: e.target.value as any })}
+                  onChange={(e) =>
+                    setNewProduct({
+                      ...newProduct,
+                      type: e.target.value as any,
+                    })
+                  }
                 >
                   <option value="website">Website</option>
                   <option value="mobile_app">Mobile App</option>
@@ -284,16 +302,28 @@ export function ProjectPage() {
                   id="product-description"
                   placeholder="Brief description of this product..."
                   value={newProduct.description}
-                  onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
+                  onChange={(e) =>
+                    setNewProduct({
+                      ...newProduct,
+                      description: e.target.value,
+                    })
+                  }
                   rows={3}
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsCreateProductOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsCreateProductOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={createProduct.isPending || !newProduct.name.trim()}>
+              <Button
+                type="submit"
+                disabled={createProduct.isPending || !newProduct.name.trim()}
+              >
                 {createProduct.isPending ? 'Adding...' : 'Add Product'}
               </Button>
             </DialogFooter>
@@ -307,9 +337,7 @@ export function ProjectPage() {
           <form onSubmit={handleUpdateProduct}>
             <DialogHeader>
               <DialogTitle>Edit Product</DialogTitle>
-              <DialogDescription>
-                Update the product details.
-              </DialogDescription>
+              <DialogDescription>Update the product details.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
@@ -318,7 +346,11 @@ export function ProjectPage() {
                   id="edit-product-name"
                   placeholder="e.g., Main Website"
                   value={editingProduct?.name || ''}
-                  onChange={(e) => setEditingProduct(prev => prev ? { ...prev, name: e.target.value } : null)}
+                  onChange={(e) =>
+                    setEditingProduct((prev) =>
+                      prev ? { ...prev, name: e.target.value } : null,
+                    )
+                  }
                   required
                 />
               </div>
@@ -328,7 +360,11 @@ export function ProjectPage() {
                   id="edit-product-type"
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                   value={editingProduct?.type || 'website'}
-                  onChange={(e) => setEditingProduct(prev => prev ? { ...prev, type: e.target.value as any } : null)}
+                  onChange={(e) =>
+                    setEditingProduct((prev) =>
+                      prev ? { ...prev, type: e.target.value as any } : null,
+                    )
+                  }
                 >
                   <option value="website">Website</option>
                   <option value="mobile_app">Mobile App</option>
@@ -344,16 +380,29 @@ export function ProjectPage() {
                   id="edit-product-description"
                   placeholder="Brief description of this product..."
                   value={editingProduct?.description || ''}
-                  onChange={(e) => setEditingProduct(prev => prev ? { ...prev, description: e.target.value } : null)}
+                  onChange={(e) =>
+                    setEditingProduct((prev) =>
+                      prev ? { ...prev, description: e.target.value } : null,
+                    )
+                  }
                   rows={3}
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsEditProductOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditProductOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={updateProduct.isPending || !editingProduct?.name.trim()}>
+              <Button
+                type="submit"
+                disabled={
+                  updateProduct.isPending || !editingProduct?.name.trim()
+                }
+              >
                 {updateProduct.isPending ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
@@ -377,7 +426,9 @@ export function ProjectPage() {
                 <CardDescription>Latest updates and changes</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">No recent activity</p>
+                <p className="text-sm text-muted-foreground">
+                  No recent activity
+                </p>
               </CardContent>
             </Card>
             <Card>
@@ -387,12 +438,14 @@ export function ProjectPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {products && products.length > 0 ? (
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     className="w-full justify-start"
                     asChild
                   >
-                    <Link to={`/projects/${projectId}/products/${products[0].id}`}>
+                    <Link
+                      to={`/projects/${projectId}/products/${products[0].id}`}
+                    >
                       <Package className="mr-2 h-4 w-4" />
                       View First Product
                     </Link>
@@ -402,8 +455,8 @@ export function ProjectPage() {
                     Add a product first to view details
                   </div>
                 )}
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full justify-start"
                   onClick={() => setIsCreateProductOpen(true)}
                 >
@@ -430,31 +483,46 @@ export function ProjectPage() {
           {products && products.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2">
               {products.map((product) => (
-                <Card key={product.id} className="group hover:shadow-md transition-shadow">
+                <Card
+                  key={product.id}
+                  className="group hover:shadow-md transition-shadow"
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                          <CardTitle className="text-base">{product.name}</CardTitle>
+                          <CardTitle className="text-base">
+                            {product.name}
+                          </CardTitle>
                           <Badge variant="secondary">{product.type}</Badge>
                         </div>
                         {product.description && (
-                          <CardDescription className="line-clamp-2">{product.description}</CardDescription>
+                          <CardDescription className="line-clamp-2">
+                            {product.description}
+                          </CardDescription>
                         )}
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                          >
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEditProductDialog(product)}>
+                          <DropdownMenuItem
+                            onClick={() => openEditProductDialog(product)}
+                          >
                             <Edit className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => deleteProduct.mutate({ id: product.id })}
+                          <DropdownMenuItem
+                            onClick={() =>
+                              deleteProduct.mutate({ id: product.id })
+                            }
                             className="text-destructive focus:text-destructive"
                             disabled={deleteProduct.isPending}
                           >
@@ -466,8 +534,15 @@ export function ProjectPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <Button variant="outline" size="sm" className="w-full" asChild>
-                      <Link to={`/projects/${projectId}/products/${product.id}`}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      asChild
+                    >
+                      <Link
+                        to={`/projects/${projectId}/products/${product.id}`}
+                      >
                         <CheckCircle className="mr-2 h-4 w-4" />
                         View Product
                       </Link>
@@ -482,9 +557,13 @@ export function ProjectPage() {
                 <Package className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h3 className="text-lg font-medium">No products yet</h3>
                 <p className="text-sm text-muted-foreground">
-                  Add products to track what you're testing (websites, mobile apps, APIs, etc.)
+                  Add products to track what you're testing (websites, mobile
+                  apps, APIs, etc.)
                 </p>
-                <Button onClick={() => setIsCreateProductOpen(true)} className="mt-4">
+                <Button
+                  onClick={() => setIsCreateProductOpen(true)}
+                  className="mt-4"
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   Add Product
                 </Button>
@@ -506,13 +585,17 @@ export function ProjectPage() {
           {teams && teams.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2">
               {teams.map((team) => (
-                <Card key={team.id} className="hover:shadow-md transition-shadow">
+                <Card
+                  key={team.id}
+                  className="hover:shadow-md transition-shadow"
+                >
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div>
                         <CardTitle className="text-base">{team.name}</CardTitle>
                         <CardDescription>
-                          {team.members?.length || 0} member{team.members?.length !== 1 ? 's' : ''}
+                          {team.members?.length || 0} member
+                          {team.members?.length !== 1 ? 's' : ''}
                         </CardDescription>
                       </div>
                     </div>
@@ -527,7 +610,10 @@ export function ProjectPage() {
                             title={member.user?.name}
                           >
                             {member.user?.avatarUrl && (
-                              <AvatarImage src={member.user.avatarUrl} alt={member.user.name} />
+                              <AvatarImage
+                                src={member.user.avatarUrl}
+                                alt={member.user.name}
+                              />
                             )}
                             <AvatarFallback className="text-xs bg-primary/10 text-primary">
                               {member.user?.name.charAt(0).toUpperCase()}
@@ -541,7 +627,12 @@ export function ProjectPage() {
                         )}
                       </div>
                     )}
-                    <Button variant="outline" size="sm" className="w-full" asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      asChild
+                    >
                       <Link to={`/projects/${projectId}/teams`}>
                         <Users className="mr-2 h-4 w-4" />
                         Manage Members

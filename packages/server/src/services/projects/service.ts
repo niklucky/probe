@@ -4,10 +4,19 @@ import type {
 } from '@probe/shared/schemas/projects';
 import { AppError } from '@probe/shared/errors/app-error';
 import type { ProjectRepository } from '../../repositories/projects/repository';
+import type { AuthorizationService } from '../authorization/service';
 
-export function createProjectService(repository: ProjectRepository) {
-  async function requireOwned(id: number, userId: number) {
-    const project = await repository.findOwned(id, userId);
+export function createProjectService(
+  repository: ProjectRepository,
+  authorization: AuthorizationService,
+) {
+  async function requireProject(
+    id: number,
+    userId: number,
+    operation: 'read' | 'manage' | 'own',
+  ) {
+    await authorization.requireProject(userId, id, operation);
+    const project = await repository.find(id);
     if (!project) {
       throw new AppError('NOT_FOUND', 'Project not found');
     }
@@ -15,8 +24,10 @@ export function createProjectService(repository: ProjectRepository) {
   }
 
   return {
-    list(userId: number) {
-      return repository.listByOwner(userId);
+    async list(userId: number) {
+      return repository.listAccessible(
+        await authorization.listProjectIds(userId),
+      );
     },
 
     create(input: CreateProjectInput, userId: number) {
@@ -30,17 +41,17 @@ export function createProjectService(repository: ProjectRepository) {
     },
 
     get(id: number, userId: number) {
-      return requireOwned(id, userId);
+      return requireProject(id, userId, 'read');
     },
 
     async update(input: UpdateProjectInput, userId: number) {
-      await requireOwned(input.id, userId);
+      await requireProject(input.id, userId, 'manage');
       const { id, ...updates } = input;
       return repository.update(id, updates);
     },
 
     async delete(id: number, userId: number) {
-      await requireOwned(id, userId);
+      await requireProject(id, userId, 'own');
       await repository.delete(id);
       return { success: true };
     },

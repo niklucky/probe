@@ -1,16 +1,32 @@
 import { AppError } from '@probe/shared/errors/app-error';
 import type { createTestSuiteRepository } from '../../repositories/test-suites/repository';
+import type { AuthorizationService } from '../authorization/service';
 
 type Repository = ReturnType<typeof createTestSuiteRepository>;
 
-export function createTestSuiteService(repository: Repository) {
+export function createTestSuiteService(
+  repository: Repository,
+  authorization: AuthorizationService,
+) {
   return {
-    list: (productId: number) => repository.list(productId),
+    async list(productId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'product', id: productId },
+        'read',
+      );
+      return repository.list(productId);
+    },
 
-    create(
+    async create(
       input: { productId: number; name: string; description?: string | null },
       userId: number,
     ) {
+      await authorization.require(
+        userId,
+        { type: 'product', id: input.productId },
+        'author',
+      );
       return repository.withTransaction(async (transactionRepository) => {
         const suite = await transactionRepository.createSuite({
           productId: input.productId,
@@ -33,16 +49,22 @@ export function createTestSuiteService(repository: Repository) {
       });
     },
 
-    async get(id: number) {
+    async get(id: number, userId: number) {
+      await authorization.require(userId, { type: 'suite', id }, 'read');
       const suite = await repository.find(id);
       if (!suite) throw new AppError('NOT_FOUND', 'Test suite not found');
       return suite;
     },
 
-    update(
+    async update(
       input: { id: number; name?: string; description?: string | null },
       userId: number,
     ) {
+      await authorization.require(
+        userId,
+        { type: 'suite', id: input.id },
+        'author',
+      );
       return repository.withTransaction(async (transactionRepository) => {
         const suite = await transactionRepository.find(input.id);
         if (!suite) throw new AppError('NOT_FOUND', 'Test suite not found');
@@ -69,8 +91,16 @@ export function createTestSuiteService(repository: Repository) {
       });
     },
 
-    listVersions: (suiteId: number) => repository.listVersions(suiteId),
-    async delete(id: number) {
+    async listVersions(suiteId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'suite', id: suiteId },
+        'read',
+      );
+      return repository.listVersions(suiteId);
+    },
+    async delete(id: number, userId: number) {
+      await authorization.require(userId, { type: 'suite', id }, 'author');
       await repository.delete(id);
       return { success: true };
     },

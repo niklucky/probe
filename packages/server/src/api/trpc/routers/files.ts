@@ -10,7 +10,7 @@ export const filesRouter = router({
   getUploadUrl: protectedProcedure
     .input(getUploadUrlInputSchema)
     .mutation(({ ctx, input }) =>
-      ctx.services.files.getUploadUrl(ctx.user.id, input.filename),
+      ctx.services.files.getUploadUrl(ctx.user.id, input),
     ),
   saveFile: protectedProcedure
     .input(saveFileInputSchema)
@@ -18,12 +18,16 @@ export const filesRouter = router({
   list: protectedProcedure
     .input(listFilesInputSchema)
     .query(({ ctx, input }) =>
-      ctx.services.files.list(input.entityType, input.entityId),
+      ctx.services.files.list(input.entityType, input.entityId, ctx.user.id),
     ),
   delete: protectedProcedure
     .input(fileIdInputSchema)
-    .mutation(({ ctx, input }) => ctx.services.files.delete(input.id)),
+    .mutation(({ ctx, input }) =>
+      ctx.services.files.delete(input.id, ctx.user.id),
+    ),
   getDownloadUrl: protectedProcedure
     .input(fileIdInputSchema)
-    .mutation(({ ctx, input }) => ctx.services.files.getDownloadUrl(input.id)),
+    .mutation(({ ctx, input }) =>
+      ctx.services.files.getDownloadUrl(input.id, ctx.user.id),
+    ),
 });

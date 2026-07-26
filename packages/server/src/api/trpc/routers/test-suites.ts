@@ -10,7 +10,9 @@ import { protectedProcedure, router } from '../../../trpc';
 export const testSuitesRouter = router({
   list: protectedProcedure
     .input(listTestSuitesInputSchema)
-    .query(({ ctx, input }) => ctx.services.testSuites.list(input.productId)),
+    .query(({ ctx, input }) =>
+      ctx.services.testSuites.list(input.productId, ctx.user.id),
+    ),
   create: protectedProcedure
     .input(createTestSuiteInputSchema)
     .mutation(({ ctx, input }) =>
@@ -18,7 +20,9 @@ export const testSuitesRouter = router({
     ),
   get: protectedProcedure
     .input(testSuiteIdInputSchema)
-    .query(({ ctx, input }) => ctx.services.testSuites.get(input.id)),
+    .query(({ ctx, input }) =>
+      ctx.services.testSuites.get(input.id, ctx.user.id),
+    ),
   update: protectedProcedure
     .input(updateTestSuiteInputSchema)
     .mutation(({ ctx, input }) =>
@@ -26,8 +30,12 @@ export const testSuitesRouter = router({
     ),
   getVersions: protectedProcedure
     .input(getTestSuiteVersionsInputSchema)
-    .query(({ ctx, input }) => ctx.services.testSuites.listVersions(input.suiteId)),
+    .query(({ ctx, input }) =>
+      ctx.services.testSuites.listVersions(input.suiteId, ctx.user.id),
+    ),
   delete: protectedProcedure
     .input(testSuiteIdInputSchema)
-    .mutation(({ ctx, input }) => ctx.services.testSuites.delete(input.id)),
+    .mutation(({ ctx, input }) =>
+      ctx.services.testSuites.delete(input.id, ctx.user.id),
+    ),
 });

@@ -21,8 +21,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FileUpload } from '@/components/file-upload';
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   CheckCircle,
   XCircle,
   SkipForward,
@@ -30,17 +30,20 @@ import {
   ChevronLeft,
   ChevronRight,
   Flag,
-  Paperclip
+  Paperclip,
 } from 'lucide-react';
 
 export function TestRunExecutePage() {
-  const { projectId, runId } = useParams<{ projectId: string; runId: string }>();
+  const { projectId, runId } = useParams<{
+    projectId: string;
+    runId: string;
+  }>();
   const navigate = useNavigate();
   const runIdNum = Number(runId);
 
   const { data: run, isLoading: isLoadingRun } = trpc.testRuns.get.useQuery(
     { id: runIdNum },
-    { enabled: !!runId }
+    { enabled: !!runId },
   );
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -54,17 +57,19 @@ export function TestRunExecutePage() {
     onSuccess: () => {
       utils.testRuns.get.invalidate({ id: runIdNum });
       setNotes('');
-      
+
       if (run) {
         const isLastTest = currentIndex >= run.items.length - 1;
-        const willBeComplete = run.results.filter(r => r.status !== 'not_run').length + 1 >= run.items.length;
-        
+        const willBeComplete =
+          run.results.filter((r) => r.status !== 'not_run').length + 1 >=
+          run.items.length;
+
         if (isLastTest && willBeComplete) {
           // This was the last test - show auto-complete dialog
           setShowAutoCompleteDialog(true);
         } else if (currentIndex < run.items.length - 1) {
           // Move to next test
-          setCurrentIndex(prev => prev + 1);
+          setCurrentIndex((prev) => prev + 1);
         }
       }
     },
@@ -80,9 +85,11 @@ export function TestRunExecutePage() {
     },
   });
 
-  const handleResult = (status: 'passed' | 'failed' | 'skipped' | 'blocked') => {
+  const handleResult = (
+    status: 'passed' | 'failed' | 'skipped' | 'blocked',
+  ) => {
     if (!run || !run.items[currentIndex]) return;
-    
+
     const currentItem = run.items[currentIndex];
     updateResult.mutate({
       runId: runIdNum,
@@ -130,18 +137,24 @@ export function TestRunExecutePage() {
 
   const currentItem = run.items[currentIndex];
   const currentTestCase = currentItem?.testCaseVersion;
-  const currentResult = currentItem ? run.results.find(r => r.testCaseVersionId === currentItem.testCaseVersionId) : null;
+  const currentResult = currentItem
+    ? run.results.find(
+        (r) => r.testCaseVersionId === currentItem.testCaseVersionId,
+      )
+    : null;
   const totalTests = run.items.length;
-  const completedTests = run.results.filter(r => r.status !== 'not_run').length;
+  const completedTests = run.results.filter(
+    (r) => r.status !== 'not_run',
+  ).length;
   const progress = totalTests > 0 ? (completedTests / totalTests) * 100 : 0;
 
   // Calculate statistics
   const stats = {
-    passed: run.results.filter(r => r.status === 'passed').length,
-    failed: run.results.filter(r => r.status === 'failed').length,
-    skipped: run.results.filter(r => r.status === 'skipped').length,
-    blocked: run.results.filter(r => r.status === 'blocked').length,
-    notRun: run.results.filter(r => r.status === 'not_run').length,
+    passed: run.results.filter((r) => r.status === 'passed').length,
+    failed: run.results.filter((r) => r.status === 'failed').length,
+    skipped: run.results.filter((r) => r.status === 'skipped').length,
+    blocked: run.results.filter((r) => r.status === 'blocked').length,
+    notRun: run.results.filter((r) => r.status === 'not_run').length,
   };
 
   return (
@@ -150,7 +163,12 @@ export function TestRunExecutePage() {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to={`/projects/${projectId}/runs`} className="hover:text-foreground">Test Runs</Link>
+            <Link
+              to={`/projects/${projectId}/runs`}
+              className="hover:text-foreground"
+            >
+              Test Runs
+            </Link>
             <span>/</span>
             <span>{run.name}</span>
           </div>
@@ -187,7 +205,7 @@ export function TestRunExecutePage() {
         </CardHeader>
         <CardContent>
           <div className="w-full bg-muted rounded-full h-2 mb-4">
-            <div 
+            <div
               className="bg-primary h-2 rounded-full transition-all"
               style={{ width: `${progress}%` }}
             />
@@ -214,7 +232,10 @@ export function TestRunExecutePage() {
       </Card>
 
       {/* Auto-Complete Dialog */}
-      <Dialog open={showAutoCompleteDialog} onOpenChange={setShowAutoCompleteDialog}>
+      <Dialog
+        open={showAutoCompleteDialog}
+        onOpenChange={setShowAutoCompleteDialog}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -222,39 +243,54 @@ export function TestRunExecutePage() {
               All Tests Completed!
             </DialogTitle>
             <DialogDescription>
-              You've completed all {totalTests} tests in this run. Would you like to mark the test run as complete?
+              You've completed all {totalTests} tests in this run. Would you
+              like to mark the test run as complete?
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div className="bg-green-50 p-3 rounded-lg text-center">
-                <div className="text-2xl font-bold text-green-600">{stats.passed}</div>
+                <div className="text-2xl font-bold text-green-600">
+                  {stats.passed}
+                </div>
                 <div className="text-green-700">Passed</div>
               </div>
               <div className="bg-red-50 p-3 rounded-lg text-center">
-                <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
+                <div className="text-2xl font-bold text-red-600">
+                  {stats.failed}
+                </div>
                 <div className="text-red-700">Failed</div>
               </div>
               <div className="bg-yellow-50 p-3 rounded-lg text-center">
-                <div className="text-2xl font-bold text-yellow-600">{stats.skipped}</div>
+                <div className="text-2xl font-bold text-yellow-600">
+                  {stats.skipped}
+                </div>
                 <div className="text-yellow-700">Skipped</div>
               </div>
               <div className="bg-gray-50 p-3 rounded-lg text-center">
-                <div className="text-2xl font-bold text-gray-600">{stats.blocked}</div>
+                <div className="text-2xl font-bold text-gray-600">
+                  {stats.blocked}
+                </div>
                 <div className="text-gray-700">Blocked</div>
               </div>
             </div>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={handleContinueTesting} className="w-full sm:w-auto">
+            <Button
+              variant="outline"
+              onClick={handleContinueTesting}
+              className="w-full sm:w-auto"
+            >
               Continue Testing
             </Button>
-            <Button 
-              onClick={handleAutoComplete} 
+            <Button
+              onClick={handleAutoComplete}
               disabled={completeRun.isPending}
               className="w-full sm:w-auto"
             >
-              {completeRun.isPending ? 'Completing...' : 'Complete Run & View Results'}
+              {completeRun.isPending
+                ? 'Completing...'
+                : 'Complete Run & View Results'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -266,15 +302,18 @@ export function TestRunExecutePage() {
           <DialogHeader>
             <DialogTitle>Complete Test Run?</DialogTitle>
             <DialogDescription>
-              Are you sure you want to complete this test run? 
+              Are you sure you want to complete this test run?
               {stats.notRun > 0 && ` ${stats.notRun} tests are still pending.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCompleteDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowCompleteDialog(false)}
+            >
               Continue Testing
             </Button>
-            <Button 
+            <Button
               onClick={() => completeRun.mutate({ id: runIdNum })}
               disabled={completeRun.isPending}
             >
@@ -291,18 +330,27 @@ export function TestRunExecutePage() {
             <div className="flex items-center justify-between">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-xl">{currentTestCase.title}</CardTitle>
-                  <Badge className={
-                    currentTestCase.priority === 'critical' ? 'bg-red-100 text-red-800' :
-                    currentTestCase.priority === 'high' ? 'bg-orange-100 text-orange-800' :
-                    currentTestCase.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-green-100 text-green-800'
-                  }>
+                  <CardTitle className="text-xl">
+                    {currentTestCase.title}
+                  </CardTitle>
+                  <Badge
+                    className={
+                      currentTestCase.priority === 'critical'
+                        ? 'bg-red-100 text-red-800'
+                        : currentTestCase.priority === 'high'
+                          ? 'bg-orange-100 text-orange-800'
+                          : currentTestCase.priority === 'medium'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
+                    }
+                  >
                     {currentTestCase.priority}
                   </Badge>
                 </div>
                 {currentTestCase.description && (
-                  <CardDescription>{currentTestCase.description}</CardDescription>
+                  <CardDescription>
+                    {currentTestCase.description}
+                  </CardDescription>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -310,7 +358,7 @@ export function TestRunExecutePage() {
                   variant="outline"
                   size="icon"
                   disabled={currentIndex === 0}
-                  onClick={() => setCurrentIndex(prev => prev - 1)}
+                  onClick={() => setCurrentIndex((prev) => prev - 1)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -321,7 +369,7 @@ export function TestRunExecutePage() {
                   variant="outline"
                   size="icon"
                   disabled={currentIndex === totalTests - 1}
-                  onClick={() => setCurrentIndex(prev => prev + 1)}
+                  onClick={() => setCurrentIndex((prev) => prev + 1)}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -329,13 +377,33 @@ export function TestRunExecutePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            {currentTestCase.prerequisites.length > 0 && (
+              <div>
+                <h3 className="font-semibold mb-3">Prerequisites:</h3>
+                <ul className="list-disc list-inside space-y-2">
+                  {currentTestCase.prerequisites.map((prerequisite, idx) => (
+                    <li
+                      key={idx}
+                      className="text-sm text-muted-foreground pl-2"
+                    >
+                      {prerequisite}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {/* Steps */}
             <div>
               <h3 className="font-semibold mb-3">Steps:</h3>
               <ol className="list-decimal list-inside space-y-2">
                 {currentTestCase.steps.map((step, idx) => (
                   <li key={idx} className="text-sm text-muted-foreground pl-2">
-                    {step}
+                    {step.action}
+                    {step.expectedResult && (
+                      <div className="ml-5 text-xs">
+                        Expected: {step.expectedResult}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -345,7 +413,9 @@ export function TestRunExecutePage() {
             {currentTestCase.expectedResult && (
               <div>
                 <h3 className="font-semibold mb-2">Expected Result:</h3>
-                <p className="text-sm text-muted-foreground">{currentTestCase.expectedResult}</p>
+                <p className="text-sm text-muted-foreground">
+                  {currentTestCase.expectedResult}
+                </p>
               </div>
             )}
 
@@ -381,7 +451,7 @@ export function TestRunExecutePage() {
             {/* Action Buttons */}
             {!run.completedAt && (
               <div className="flex gap-2 pt-4">
-                <Button 
+                <Button
                   onClick={() => handleResult('passed')}
                   disabled={updateResult.isPending}
                   className="flex-1 bg-green-600 hover:bg-green-700"
@@ -389,7 +459,7 @@ export function TestRunExecutePage() {
                   <CheckCircle className="mr-2 h-4 w-4" />
                   Pass
                 </Button>
-                <Button 
+                <Button
                   onClick={() => handleResult('failed')}
                   disabled={updateResult.isPending}
                   variant="destructive"
@@ -398,7 +468,7 @@ export function TestRunExecutePage() {
                   <XCircle className="mr-2 h-4 w-4" />
                   Fail
                 </Button>
-                <Button 
+                <Button
                   onClick={() => handleResult('skipped')}
                   disabled={updateResult.isPending}
                   variant="outline"
@@ -420,7 +490,10 @@ export function TestRunExecutePage() {
               You've gone through all {totalTests} tests in this run.
             </p>
             {!run.completedAt && (
-              <Button onClick={() => setShowCompleteDialog(true)} className="mt-4">
+              <Button
+                onClick={() => setShowCompleteDialog(true)}
+                className="mt-4"
+              >
                 <Flag className="mr-2 h-4 w-4" />
                 Complete Test Run
               </Button>

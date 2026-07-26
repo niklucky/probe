@@ -17,9 +17,16 @@ import { Client } from 'minio';
 import { createFileRepository } from '../repositories/files/repository';
 import { createFileService } from '../services/files/service';
 import { createSystemService } from '../services/system/service';
+import { createAuthorizationRepository } from '../repositories/authorization/repository';
+import { createAuthorizationService } from '../services/authorization/service';
+import { createEnvironmentRepository } from '../repositories/environments/repository';
+import { createEnvironmentService } from '../services/environments/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
+  const authorization = createAuthorizationService(
+    createAuthorizationRepository(),
+  );
   const storage = new Client({
     endPoint: process.env.MINIO_ENDPOINT || 'localhost',
     port: Number.parseInt(process.env.MINIO_PORT || '11002'),
@@ -33,14 +40,23 @@ export function createServices() {
       createFileRepository(),
       storage,
       process.env.MINIO_BUCKET || 'signal-assets',
+      authorization,
     ),
-    projects: createProjectService(createProjectRepository()),
-    products: createProductService(createProductRepository()),
+    authorization,
+    environments: createEnvironmentService(
+      createEnvironmentRepository(),
+      authorization,
+    ),
+    projects: createProjectService(createProjectRepository(), authorization),
+    products: createProductService(createProductRepository(), authorization),
     system: createSystemService(),
-    teams: createTeamService(createTeamRepository()),
-    testSuites: createTestSuiteService(createTestSuiteRepository()),
-    testCases: createTestCaseService(createTestCaseRepository()),
-    testRuns: createTestRunService(createTestRunRepository()),
+    teams: createTeamService(createTeamRepository(), authorization),
+    testSuites: createTestSuiteService(
+      createTestSuiteRepository(),
+      authorization,
+    ),
+    testCases: createTestCaseService(createTestCaseRepository(), authorization),
+    testRuns: createTestRunService(createTestRunRepository(), authorization),
     users: createUserService(userRepository),
   };
 }
