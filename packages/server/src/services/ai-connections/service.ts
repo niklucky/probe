@@ -164,6 +164,67 @@ export function createAiConnectionService(
     };
   }
 
+  async function resolveAdapter(
+    scope: AiConnectionScope,
+    id?: number | string,
+  ) {
+    if (typeof id === 'string') {
+      const connection = environmentConnections().find(
+        (candidate) =>
+          candidate.id === id && candidate.enabled && candidate.scope === scope,
+      );
+      if (!connection) throw new NotFoundError('AI connection not found');
+      await validateConfiguration(connection);
+      return {
+        adapter: guardedAdapter(connection),
+        connectionRef: connection.id,
+      };
+    }
+    if (typeof id === 'number') {
+      const { connection, config } = await databaseConfig(id);
+      if (!connection.enabled || connection.scope !== scope) {
+        throw new NotFoundError('AI connection not found');
+      }
+      await validateConfiguration(config);
+      return { adapter: guardedAdapter(config), connectionRef: String(id) };
+    }
+
+    const deploymentConnection = environmentConnections().find(
+      (connection) =>
+        connection.enabled &&
+        connection.isDefault &&
+        connection.scope === scope,
+    );
+    if (deploymentConnection) {
+      await validateConfiguration(deploymentConnection);
+      return {
+        adapter: guardedAdapter(deploymentConnection),
+        connectionRef: deploymentConnection.id,
+      };
+    }
+    const connection = await repository.getDefault(scope);
+    if (!connection) {
+      throw new NotFoundError(
+        `No default AI connection is configured for ${scope}`,
+      );
+    }
+    const secrets = connection.encryptedConfig
+      ? cipher.decrypt(connection.encryptedConfig)
+      : {};
+    const config = {
+      provider: connection.provider,
+      endpoint: connection.endpoint,
+      model: connection.model,
+      capabilities: connection.capabilities,
+      ...secrets,
+    } satisfies AiConnectionConfig;
+    await validateConfiguration(config);
+    return {
+      adapter: guardedAdapter(config),
+      connectionRef: String(connection.id),
+    };
+  }
+
   function guardedAdapter(config: AiConnectionConfig): AiAdapter {
     const adapter = adapterFactory(config);
     return {
@@ -179,6 +240,20 @@ export function createAiConnectionService(
   }
 
   return {
+    async listAvailable(scope: AiConnectionScope) {
+      const [database, environment] = await Promise.all([
+        repository.listEnabledByScope(scope),
+        Promise.resolve(environmentConnections()),
+      ]);
+      return [
+        ...environment
+          .filter(
+            (connection) => connection.enabled && connection.scope === scope,
+          )
+          .map(safeEnvironmentConnection),
+        ...database.map(safeDatabaseConnection),
+      ];
+    },
     async list(actor: AiConnectionActor) {
       requireAdmin(actor);
       const [database, environment] = await Promise.all([
@@ -311,34 +386,11 @@ export function createAiConnectionService(
     },
 
     async getDefaultAdapter(scope: AiConnectionScope) {
-      const deploymentConnection = environmentConnections().find(
-        (connection) =>
-          connection.enabled &&
-          connection.isDefault &&
-          connection.scope === scope,
-      );
-      if (deploymentConnection) {
-        await validateConfiguration(deploymentConnection);
-        return guardedAdapter(deploymentConnection);
-      }
-      const connection = await repository.getDefault(scope);
-      if (!connection) {
-        throw new NotFoundError(
-          `No default AI connection is configured for ${scope}`,
-        );
-      }
-      const secrets = connection.encryptedConfig
-        ? cipher.decrypt(connection.encryptedConfig)
-        : {};
-      const config = {
-        provider: connection.provider,
-        endpoint: connection.endpoint,
-        model: connection.model,
-        capabilities: connection.capabilities,
-        ...secrets,
-      } satisfies AiConnectionConfig;
-      await validateConfiguration(config);
-      return guardedAdapter(config);
+      return (await resolveAdapter(scope)).adapter;
+    },
+
+    getAdapter(scope: AiConnectionScope, id?: number | string) {
+      return resolveAdapter(scope, id);
     },
   };
 }

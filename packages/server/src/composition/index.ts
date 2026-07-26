@@ -25,6 +25,8 @@ import { createAiConnectionRepository } from '../repositories/ai-connections/rep
 import { createAiConnectionService } from '../services/ai-connections/service';
 import { createCredentialCipher } from '../services/ai-connections/encryption';
 import { serverEnv } from '../env';
+import { createAiAuthoringRepository } from '../repositories/ai-authoring/repository';
+import { createAiAuthoringService } from '../services/ai-authoring/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -38,6 +40,18 @@ export function createServices() {
     accessKey: serverEnv.MINIO_ACCESS_KEY,
     secretKey: serverEnv.MINIO_SECRET_KEY,
   });
+  const aiConnections = createAiConnectionService(
+    createAiConnectionRepository(),
+    createCredentialCipher(),
+  );
+  const testCases = createTestCaseService(
+    createTestCaseRepository(),
+    authorization,
+  );
+  const environments = createEnvironmentService(
+    createEnvironmentRepository(),
+    authorization,
+  );
   return {
     auth: createAuthService(userRepository),
     files: createFileService(
@@ -47,13 +61,14 @@ export function createServices() {
       authorization,
     ),
     authorization,
-    environments: createEnvironmentService(
-      createEnvironmentRepository(),
+    environments,
+    aiConnections,
+    aiAuthoring: createAiAuthoringService(
+      createAiAuthoringRepository(),
       authorization,
-    ),
-    aiConnections: createAiConnectionService(
-      createAiConnectionRepository(),
-      createCredentialCipher(),
+      aiConnections,
+      testCases,
+      environments,
     ),
     projects: createProjectService(createProjectRepository(), authorization),
     products: createProductService(createProductRepository(), authorization),
@@ -63,7 +78,7 @@ export function createServices() {
       createTestSuiteRepository(),
       authorization,
     ),
-    testCases: createTestCaseService(createTestCaseRepository(), authorization),
+    testCases,
     testRuns: createTestRunService(createTestRunRepository(), authorization),
     users: createUserService(userRepository),
   };

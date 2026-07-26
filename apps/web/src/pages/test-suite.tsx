@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { TestSpec } from '@probe/shared/schemas/test-cases';
 import { useParams, Link } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AiTestCaseDialog } from '@/components/ai-test-case-dialog';
 import {
   ArrowLeft,
   Plus,
@@ -40,6 +42,7 @@ import {
   MoreVertical,
   Trash2,
   Edit,
+  Sparkles,
 } from 'lucide-react';
 
 export function TestSuitePage() {
@@ -76,6 +79,11 @@ export function TestSuitePage() {
     tags: string[];
   } | null>(null);
   const [editTagInput, setEditTagInput] = useState('');
+  const [aiDialog, setAiDialog] = useState<{
+    mode: 'generate' | 'improve';
+    testCaseId?: number;
+    currentSpec?: TestSpec;
+  } | null>(null);
 
   const { data: suite, isLoading: isLoadingSuite } =
     trpc.testSuites.get.useQuery(
@@ -221,6 +229,26 @@ export function TestSuitePage() {
       tags: currentVersion.tags,
     });
     setIsEditDialogOpen(true);
+  };
+
+  const openImproveDialog = (
+    testCase: NonNullable<typeof testCases>[number],
+  ) => {
+    const currentVersion = testCase.currentVersion || testCase.versions?.[0];
+    if (!currentVersion) return;
+    setAiDialog({
+      mode: 'improve',
+      testCaseId: testCase.id,
+      currentSpec: {
+        title: currentVersion.title,
+        description: currentVersion.description || undefined,
+        prerequisites: currentVersion.prerequisites,
+        steps: currentVersion.steps,
+        expectedResult: currentVersion.expectedResult,
+        priority: currentVersion.priority,
+        tags: currentVersion.tags,
+      },
+    });
   };
 
   const handleEditAddStep = () => {
@@ -412,6 +440,13 @@ export function TestSuitePage() {
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
             </Link>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setAiDialog({ mode: 'generate' })}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            Generate with AI
           </Button>
           <Dialog
             open={isCreateDialogOpen}
@@ -954,6 +989,12 @@ export function TestSuitePage() {
                               Edit
                             </DropdownMenuItem>
                             <DropdownMenuItem
+                              onClick={() => openImproveDialog(testCase)}
+                            >
+                              <Sparkles className="mr-2 h-4 w-4" />
+                              Improve with AI
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               onClick={() =>
                                 deleteTestCase.mutate({ id: testCase.id })
                               }
@@ -1048,6 +1089,23 @@ export function TestSuitePage() {
           )}
         </TabsContent>
       </Tabs>
+      {aiDialog && (
+        <AiTestCaseDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setAiDialog(null);
+          }}
+          mode={aiDialog.mode}
+          suiteId={Number(suiteId)}
+          projectId={Number(projectId)}
+          productId={Number(productId)}
+          testCaseId={aiDialog.testCaseId}
+          currentSpec={aiDialog.currentSpec}
+          onAccepted={() => {
+            utils.testCases.list.invalidate({ suiteId: Number(suiteId) });
+          }}
+        />
+      )}
     </div>
   );
 }
