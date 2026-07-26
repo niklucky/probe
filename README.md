@@ -50,7 +50,7 @@ probe/
 │   ├── trpc/             # tRPC router & shared types
 │   ├── shared/           # Shared TypeScript types
 │   └── typescript-config/# Shared TS configs
-├── docker-compose.yml    # Postgres + MinIO
+├── compose.local.yml     # Local Postgres + MinIO
 └── turbo.json           # Turborepo config
 ```
 
@@ -71,12 +71,12 @@ bun install
 ### 2. Start Infrastructure
 
 ```bash
-docker-compose up -d
+docker compose -f compose.local.yml up -d
 ```
 
 This starts:
-- PostgreSQL 17 on port 5432
-- MinIO on ports 9000 (API) and 9001 (Console)
+- PostgreSQL 17 on port 11001
+- MinIO on ports 11002 (API) and 11003 (Console)
 
 ### 3. Setup Database
 
