@@ -8,9 +8,10 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
   boolean,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // Enums
 export const userRoleEnum = pgEnum('user_role', [
@@ -51,6 +52,16 @@ export const environmentTypeEnum = pgEnum('environment_type', [
   'staging',
   'production',
   'custom',
+]);
+export const aiProviderEnum = pgEnum('ai_provider', [
+  'openai',
+  'anthropic',
+  'openai-compatible',
+]);
+export const aiConnectionScopeEnum = pgEnum('ai_connection_scope', [
+  'general',
+  'test-authoring',
+  'test-execution',
 ]);
 
 // Users table
@@ -121,6 +132,61 @@ export const environments = pgTable(
   (table) => ({
     projectIndex: index('environments_project_index').on(table.projectId),
     productIndex: index('environments_product_index').on(table.productId),
+  }),
+);
+
+// AI credentials and custom headers are stored only in encryptedConfig. Never
+// select this table directly for API responses; the server repository redacts it.
+export const aiConnections = pgTable(
+  'ai_connections',
+  {
+    id: serial('id').primaryKey(),
+    name: varchar('name', { length: 255 }).notNull(),
+    provider: aiProviderEnum('provider').notNull(),
+    endpoint: varchar('endpoint', { length: 2048 }),
+    model: varchar('model', { length: 255 }).notNull(),
+    capabilities: jsonb('capabilities').$type<string[]>().notNull().default([]),
+    scope: aiConnectionScopeEnum('scope').notNull().default('general'),
+    enabled: boolean('enabled').notNull().default(true),
+    isDefault: boolean('is_default').notNull().default(false),
+    encryptedConfig: text('encrypted_config'),
+    hasCredentials: boolean('has_credentials').notNull().default(false),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    scopeIndex: index('ai_connections_scope_index').on(
+      table.scope,
+      table.enabled,
+      table.isDefault,
+    ),
+    oneDefaultPerScope: uniqueIndex('ai_connections_one_default_per_scope')
+      .on(table.scope)
+      .where(sql`${table.isDefault} = true`),
+  }),
+);
+
+export const aiConnectionAuditLogs = pgTable(
+  'ai_connection_audit_logs',
+  {
+    id: serial('id').primaryKey(),
+    connectionId: integer('connection_id').references(() => aiConnections.id, {
+      onDelete: 'set null',
+    }),
+    actorUserId: integer('actor_user_id')
+      .references(() => users.id)
+      .notNull(),
+    action: varchar('action', { length: 50 }).notNull(),
+    changes: jsonb('changes').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    connectionIndex: index('ai_connection_audit_connection_index').on(
+      table.connectionId,
+    ),
   }),
 );
 
@@ -351,6 +417,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   testSuites: many(testSuites),
   testCases: many(testCases),
   testRuns: many(testRuns),
+  aiConnections: many(aiConnections),
+  aiConnectionAuditLogs: many(aiConnectionAuditLogs),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -386,6 +454,31 @@ export const environmentsRelations = relations(environments, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const aiConnectionsRelations = relations(
+  aiConnections,
+  ({ one, many }) => ({
+    createdBy: one(users, {
+      fields: [aiConnections.createdById],
+      references: [users.id],
+    }),
+    auditLogs: many(aiConnectionAuditLogs),
+  }),
+);
+
+export const aiConnectionAuditLogsRelations = relations(
+  aiConnectionAuditLogs,
+  ({ one }) => ({
+    connection: one(aiConnections, {
+      fields: [aiConnectionAuditLogs.connectionId],
+      references: [aiConnections.id],
+    }),
+    actor: one(users, {
+      fields: [aiConnectionAuditLogs.actorUserId],
+      references: [users.id],
+    }),
+  }),
+);
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
   project: one(projects, {
