@@ -6,6 +6,7 @@ import {
   db,
   desc,
   eq,
+  type CreateAiConnection,
 } from '@probe/db';
 
 type Database = typeof db;
@@ -42,17 +43,14 @@ function bindAiConnectionRepository(database: Database) {
         .limit(1);
       return connection;
     },
-    async create(values: typeof aiConnections.$inferInsert) {
+    async create(values: CreateAiConnection) {
       const [connection] = await database
         .insert(aiConnections)
         .values(values)
         .returning(safeSelection);
       return connection;
     },
-    async update(
-      id: number,
-      values: Partial<typeof aiConnections.$inferInsert>,
-    ) {
+    async update(id: number, values: Partial<CreateAiConnection>) {
       const [connection] = await database
         .update(aiConnections)
         .set({ ...values, updatedAt: new Date() })

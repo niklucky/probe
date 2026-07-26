@@ -1,10 +1,10 @@
-import { services } from '@probe/server';
+import { serverEnv, services } from '@probe/server';
 import { app } from './server';
 
 async function startServer() {
   try {
     await services.system.runMigrations();
-    const port = Number.parseInt(process.env.PORT || '11010');
+    const port = serverEnv.PORT;
     console.log(`🚀 Server ready at http://localhost:${port}`);
     console.log(`➜ TRPC endpoint: http://localhost:${port}/trpc`);
     console.log(`➜ Health check: http://localhost:${port}/health`);

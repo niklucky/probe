@@ -1,28 +1,23 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { AppError } from '@probe/shared/errors/app-error';
+import { InternalServerError } from '@probe/shared/errors/app-error';
+import { serverEnv } from '../../env';
 
 const ALGORITHM = 'aes-256-gcm';
 
 function decodeMasterKey(value: string | undefined) {
   if (!value) {
-    throw new AppError(
-      'INTERNAL_SERVER_ERROR',
-      'AI credential encryption is not configured',
-    );
+    throw new InternalServerError('AI credential encryption is not configured');
   }
   const key = /^[a-f0-9]{64}$/i.test(value)
     ? Buffer.from(value, 'hex')
     : Buffer.from(value, 'base64');
   if (key.length !== 32) {
-    throw new AppError(
-      'INTERNAL_SERVER_ERROR',
-      'AI credential encryption key is invalid',
-    );
+    throw new InternalServerError('AI credential encryption key is invalid');
   }
   return key;
 }
 
-export function createCredentialCipher(masterKey = process.env.AI_MASTER_KEY) {
+export function createCredentialCipher(masterKey = serverEnv.AI_MASTER_KEY) {
   return {
     encrypt(value: Record<string, unknown>) {
       const key = decodeMasterKey(masterKey);
@@ -49,10 +44,7 @@ export function createCredentialCipher(masterKey = process.env.AI_MASTER_KEY) {
         !ciphertext ||
         extra !== undefined
       ) {
-        throw new AppError(
-          'INTERNAL_SERVER_ERROR',
-          'Stored AI credentials are invalid',
-        );
+        throw new InternalServerError('Stored AI credentials are invalid');
       }
       try {
         const decipher = createDecipheriv(
@@ -70,8 +62,7 @@ export function createCredentialCipher(masterKey = process.env.AI_MASTER_KEY) {
           headers?: Record<string, string>;
         };
       } catch {
-        throw new AppError(
-          'INTERNAL_SERVER_ERROR',
+        throw new InternalServerError(
           'Stored AI credentials could not be decrypted',
         );
       }

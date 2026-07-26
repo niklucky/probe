@@ -1,10 +1,6 @@
 import type { AiConnectionConfig, AiProvider } from '@probe/ai';
-import {
-  aiConnectionScopeSchema,
-  aiProviderSchema,
-  type AiConnectionScope,
-} from '@probe/shared/schemas/ai-connections';
-import { AppError } from '@probe/shared/errors/app-error';
+import { type AiConnectionScope } from '@probe/shared/schemas/ai-connections';
+import { parseServerEnv } from '../../env';
 
 export interface EnvironmentAiConnection extends AiConnectionConfig {
   id: string;
@@ -15,7 +11,7 @@ export interface EnvironmentAiConnection extends AiConnectionConfig {
 }
 
 function fromStandardEnvironment(
-  env: NodeJS.ProcessEnv,
+  env: ReturnType<typeof parseServerEnv>,
 ): EnvironmentAiConnection[] {
   const connections: EnvironmentAiConnection[] = [];
   if (env.OPENAI_MODEL) {
@@ -48,64 +44,24 @@ function fromStandardEnvironment(
 export function loadEnvironmentAiConnections(
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentAiConnection[] {
-  const standard = fromStandardEnvironment(env);
-  if (!env.AI_CONNECTIONS_JSON) return standard;
-  let values: unknown;
-  try {
-    values = JSON.parse(env.AI_CONNECTIONS_JSON);
-  } catch {
-    throw new AppError(
-      'INTERNAL_SERVER_ERROR',
-      'Deployment AI connection configuration is invalid',
-    );
-  }
-  if (!Array.isArray(values)) {
-    throw new AppError(
-      'INTERNAL_SERVER_ERROR',
-      'Deployment AI connection configuration must be an array',
-    );
-  }
-  return values.map((value, index) => {
-    if (!value || typeof value !== 'object') {
-      throw new AppError(
-        'INTERNAL_SERVER_ERROR',
-        'Deployment AI connection entry is invalid',
-      );
-    }
-    const item = value as Record<string, unknown>;
-    const provider = aiProviderSchema.safeParse(item.provider);
-    const scope = aiConnectionScopeSchema.safeParse(item.scope ?? 'general');
-    if (
-      !provider.success ||
-      !scope.success ||
-      typeof item.name !== 'string' ||
-      typeof item.model !== 'string'
-    ) {
-      throw new AppError(
-        'INTERNAL_SERVER_ERROR',
-        'Deployment AI connection entry is invalid',
-      );
-    }
-    return {
-      id: `env:${index}`,
-      name: item.name,
-      provider: provider.data as AiProvider,
-      endpoint: typeof item.endpoint === 'string' ? item.endpoint : undefined,
-      model: item.model,
-      apiKey: typeof item.apiKey === 'string' ? item.apiKey : undefined,
-      headers:
-        item.headers && typeof item.headers === 'object'
-          ? (item.headers as Record<string, string>)
-          : undefined,
-      capabilities: Array.isArray(item.capabilities)
-        ? item.capabilities.filter(
-            (capability): capability is string =>
-              typeof capability === 'string',
-          )
-        : [],
-      scope: scope.data,
-      enabled: item.enabled !== false,
-      isDefault: item.isDefault === true,
-    };
-  });
+  const parsed = parseServerEnv(env);
+  const standard = fromStandardEnvironment(parsed);
+  return [
+    ...standard,
+    ...parsed.AI_CONNECTIONS_JSON.map((item, index) => {
+      return {
+        id: `env:${index}`,
+        name: item.name,
+        provider: item.provider as AiProvider,
+        endpoint: item.endpoint || undefined,
+        model: item.model,
+        apiKey: item.apiKey,
+        headers: item.headers,
+        capabilities: item.capabilities,
+        scope: item.scope,
+        enabled: item.enabled,
+        isDefault: item.isDefault,
+      };
+    }),
+  ];
 }

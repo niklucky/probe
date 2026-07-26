@@ -2,6 +2,7 @@ import { AppError } from '@probe/shared/errors/app-error';
 import type { Client } from 'minio';
 import type { createFileRepository } from '../../repositories/files/repository';
 import type { AuthorizationService } from '../authorization/service';
+import { serverEnv } from '../../env';
 
 type Repository = ReturnType<typeof createFileRepository>;
 
@@ -34,7 +35,7 @@ export function createFileService(
             objectName,
             24 * 60 * 60,
           ),
-          publicUrl: `${process.env.MINIO_PUBLIC_URL || 'http://localhost:11002'}/${bucketName}/${objectName}`,
+          publicUrl: `${serverEnv.MINIO_PUBLIC_URL}/${bucketName}/${objectName}`,
           objectName,
         };
       } catch {
@@ -71,7 +72,7 @@ export function createFileService(
             300,
           ),
           objectName,
-          publicUrl: `http://${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || '11002'}/${bucketName}/${objectName}`,
+          publicUrl: `${serverEnv.MINIO_PUBLIC_URL}/${bucketName}/${objectName}`,
         };
       } catch {
         throw new AppError(

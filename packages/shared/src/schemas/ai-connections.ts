@@ -1,3 +1,5 @@
+import { aiConnections } from '@probe/db';
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import { z } from 'zod';
 
 export const aiProviders = [
@@ -25,17 +27,36 @@ export const aiConnectionSecretInputSchema = z.object({
   headers: z.record(headerNameSchema, z.string().max(8192)).optional(),
 });
 
-const aiConnectionValuesSchema = z.object({
+const aiConnectionInsertSchema = createInsertSchema(aiConnections, {
   name: z.string().trim().min(1).max(255),
-  provider: aiProviderSchema,
   endpoint: z.string().url().max(2048).nullable().optional(),
   model: z.string().trim().min(1).max(255),
-  capabilities: z.array(z.string().trim().min(1).max(100)).max(32).default([]),
-  scope: aiConnectionScopeSchema.default('general'),
-  enabled: z.boolean().default(true),
-  isDefault: z.boolean().default(false),
-  secrets: aiConnectionSecretInputSchema.optional(),
+  capabilities: z.array(z.string().trim().min(1).max(100)).max(32),
 });
+const aiConnectionSelectSchema = createSelectSchema(aiConnections);
+
+const aiConnectionValuesSchema = aiConnectionInsertSchema
+  .pick({
+    name: true,
+    provider: true,
+    endpoint: true,
+    model: true,
+    capabilities: true,
+    scope: true,
+    enabled: true,
+    isDefault: true,
+  })
+  .extend({
+    provider: aiProviderSchema,
+    capabilities: z
+      .array(z.string().trim().min(1).max(100))
+      .max(32)
+      .default([]),
+    scope: aiConnectionScopeSchema.default('general'),
+    enabled: z.boolean().default(true),
+    isDefault: z.boolean().default(false),
+    secrets: aiConnectionSecretInputSchema.optional(),
+  });
 
 export const createAiConnectionInputSchema = aiConnectionValuesSchema;
 export const updateAiConnectionInputSchema = aiConnectionValuesSchema
@@ -55,22 +76,18 @@ export const aiConnectionScopeInputSchema = z.object({
   scope: aiConnectionScopeSchema,
 });
 
-export const aiConnectionSchema = z.object({
-  id: z.number().int().positive().or(z.string().min(1)),
-  source: z.enum(['database', 'environment']),
-  name: z.string(),
-  provider: aiProviderSchema,
-  endpoint: z.string().nullable(),
-  model: z.string(),
-  capabilities: z.array(z.string()),
-  scope: aiConnectionScopeSchema,
-  enabled: z.boolean(),
-  isDefault: z.boolean(),
-  hasCredentials: z.boolean(),
-  createdById: z.number().int().positive().nullable(),
-  createdAt: z.date().nullable(),
-  updatedAt: z.date().nullable(),
-});
+export const aiConnectionSchema = aiConnectionSelectSchema
+  .omit({ encryptedConfig: true })
+  .extend({
+    id: aiConnectionSelectSchema.shape.id.or(z.string().min(1)),
+    source: z.enum(['database', 'environment']),
+    provider: aiProviderSchema,
+    capabilities: z.array(z.string()),
+    scope: aiConnectionScopeSchema,
+    createdById: z.number().int().positive().nullable(),
+    createdAt: z.date().nullable(),
+    updatedAt: z.date().nullable(),
+  });
 
 export const aiConnectionTestResultSchema = z.object({
   ok: z.literal(true),

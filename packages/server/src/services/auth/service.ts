@@ -2,11 +2,11 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { AppError } from '@probe/shared/errors/app-error';
 import type { createUserRepository } from '../../repositories/users/repository';
+import { serverEnv } from '../../env';
 
 type Repository = ReturnType<typeof createUserRepository>;
 
-const jwtSecret =
-  process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+const jwtSecret = serverEnv.JWT_SECRET;
 
 export function createAuthService(repository: Repository) {
   function issueToken(user: { id: number; email: string }) {

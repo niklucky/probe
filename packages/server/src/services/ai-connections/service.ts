@@ -6,7 +6,7 @@ import {
   type AiConnectionConfig,
   type EndpointNetworkPolicy,
 } from '@probe/ai';
-import { AppError } from '@probe/shared/errors/app-error';
+import { BadRequestError, NotFoundError } from '@probe/shared/errors/app-error';
 import type {
   AiConnectionScope,
   CreateAiConnectionInput,
@@ -19,6 +19,7 @@ import {
   loadEnvironmentAiConnections,
   type EnvironmentAiConnection,
 } from './environment';
+import { serverEnv } from '../../env';
 
 export interface AiConnectionActor {
   id: number;
@@ -37,7 +38,7 @@ interface ServiceOptions {
 
 function requireAdmin(actor: AiConnectionActor) {
   if (actor.role !== 'admin') {
-    throw new AppError('NOT_FOUND', 'Resource not found');
+    throw new NotFoundError('Resource not found');
   }
 }
 
@@ -77,13 +78,10 @@ function safeDatabaseConnection<
 
 function mapProviderError(error: unknown): never {
   if (!(error instanceof AiProviderError)) throw error;
-  const code =
-    error.code === 'INVALID_CONFIGURATION'
-      ? 'BAD_REQUEST'
-      : error.code === 'MODEL_NOT_FOUND'
-        ? 'NOT_FOUND'
-        : 'BAD_REQUEST';
-  throw new AppError(code, error.message);
+  if (error.code === 'MODEL_NOT_FOUND') {
+    throw new NotFoundError(error.message);
+  }
+  throw new BadRequestError(error.message);
 }
 
 function nonSecretChanges(
@@ -113,11 +111,7 @@ export function createAiConnectionService(
   const adapterFactory = options.adapterFactory || createAiAdapter;
   const endpointValidator = options.endpointValidator || assertEndpointAllowed;
   const approvedLocalHosts =
-    options.approvedLocalHosts ||
-    (process.env.AI_APPROVED_LOCAL_HOSTS || '')
-      .split(',')
-      .map((host) => host.trim().toLowerCase())
-      .filter(Boolean);
+    options.approvedLocalHosts || serverEnv.AI_APPROVED_LOCAL_HOSTS;
 
   async function validateConfiguration(
     config: Pick<
@@ -126,8 +120,7 @@ export function createAiConnectionService(
     >,
   ) {
     if (config.provider === 'openai-compatible' && !config.endpoint) {
-      throw new AppError(
-        'BAD_REQUEST',
+      throw new BadRequestError(
         'OpenAI-compatible connections require an endpoint',
       );
     }
@@ -146,8 +139,7 @@ export function createAiConnectionService(
         config.provider === 'openai-compatible' &&
         approvedLocalHosts.includes(hostname);
       if (!permittedLocalConnection) {
-        throw new AppError(
-          'BAD_REQUEST',
+        throw new BadRequestError(
           'Credentials are required unless this is an explicitly approved local endpoint',
         );
       }
@@ -156,7 +148,7 @@ export function createAiConnectionService(
 
   async function databaseConfig(id: number) {
     const connection = await repository.find(id);
-    if (!connection) throw new AppError('NOT_FOUND', 'AI connection not found');
+    if (!connection) throw new NotFoundError('AI connection not found');
     const secrets = connection.encryptedConfig
       ? cipher.decrypt(connection.encryptedConfig)
       : {};
@@ -237,7 +229,7 @@ export function createAiConnectionService(
     async update(input: UpdateAiConnectionInput, actor: AiConnectionActor) {
       requireAdmin(actor);
       const current = await repository.find(input.id);
-      if (!current) throw new AppError('NOT_FOUND', 'AI connection not found');
+      if (!current) throw new NotFoundError('AI connection not found');
       const currentSecrets = current.encryptedConfig
         ? cipher.decrypt(current.encryptedConfig)
         : {};
@@ -271,7 +263,7 @@ export function createAiConnectionService(
             : {}),
         });
         if (!connection) {
-          throw new AppError('NOT_FOUND', 'AI connection not found');
+          throw new NotFoundError('AI connection not found');
         }
         await transaction.audit(
           id,
@@ -288,7 +280,7 @@ export function createAiConnectionService(
       return repository.withTransaction(async (transaction) => {
         const deleted = await transaction.delete(id);
         if (!deleted) {
-          throw new AppError('NOT_FOUND', 'AI connection not found');
+          throw new NotFoundError('AI connection not found');
         }
         await transaction.audit(null, actor.id, 'deleted', {
           connectionId: id,
@@ -305,7 +297,7 @@ export function createAiConnectionService(
           (candidate) => candidate.id === id,
         );
         if (!connection) {
-          throw new AppError('NOT_FOUND', 'AI connection not found');
+          throw new NotFoundError('AI connection not found');
         }
         config = connection;
       } else {
@@ -331,8 +323,7 @@ export function createAiConnectionService(
       }
       const connection = await repository.getDefault(scope);
       if (!connection) {
-        throw new AppError(
-          'NOT_FOUND',
+        throw new NotFoundError(
           `No default AI connection is configured for ${scope}`,
         );
       }
