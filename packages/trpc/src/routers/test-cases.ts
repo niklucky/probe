@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
-import { db, testCases, testCaseVersions, testSuites, testSuiteVersions, eq, and, desc, inArray } from '@signal/db';
+import { db, testCases, testCaseVersions, testSuites, eq, desc } from '@probe/db';
 import { TRPCError } from '@trpc/server';
 
 export const testCasesRouter = router({
@@ -19,7 +19,11 @@ export const testCasesRouter = router({
           },
           orderBy: desc(testCaseVersions.createdAt),
         });
-        return cases;
+        return cases.map(({ testCase, ...version }) => ({
+          ...testCase,
+          versions: [version],
+          currentVersion: version,
+        }));
       }
 
       // Otherwise, get current versions for all cases in suite

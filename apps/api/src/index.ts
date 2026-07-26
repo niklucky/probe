@@ -2,10 +2,10 @@ import { Hono } from 'hono';
 import { trpcServer } from '@hono/trpc-server';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { appRouter, createContext } from '@signal/trpc';
-import { db, runMigrations, testConnection } from '@signal/db';
+import { appRouter, createContext } from '@probe/trpc';
+import { db, runMigrations, testConnection } from '@probe/db';
 import { eq } from 'drizzle-orm';
-import { users } from '@signal/db';
+import { users } from '@probe/db';
 import jwt from 'jsonwebtoken';
 import * as Minio from 'minio';
 
@@ -16,6 +16,7 @@ export const minioClient = new Minio.Client({
   endPoint: process.env.MINIO_ENDPOINT || 'localhost',
   port: parseInt(process.env.MINIO_PORT || '11002'),
   useSSL: process.env.MINIO_USE_SSL === 'true',
+  // Preserve the legacy local credentials so existing MinIO data remains accessible.
   accessKey: process.env.MINIO_ACCESS_KEY || 'signal',
   secretKey: process.env.MINIO_SECRET_KEY || 'signal_password',
 });
@@ -60,6 +61,7 @@ app.post('/upload', async (c) => {
     return c.json({ error: 'Missing filename or contentType' }, 400);
   }
 
+  // Preserve the legacy local bucket name; see README migration notes.
   const bucketName = process.env.MINIO_BUCKET || 'signal-assets';
   const objectName = `uploads/${Date.now()}-${filename}`;
   const expires = 24 * 60 * 60; // 24 hours
@@ -100,6 +102,8 @@ app.use(
               email: true,
               name: true,
               role: true,
+              avatarUrl: true,
+              avatarType: true,
               createdAt: true,
               updatedAt: true,
             },

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
-import { db, products, eq, and } from '@signal/db';
+import { db, products, eq } from '@probe/db';
 import { TRPCError } from '@trpc/server';
 
 export const productsRouter = router({

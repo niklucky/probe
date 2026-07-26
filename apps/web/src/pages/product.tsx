@@ -113,7 +113,7 @@ export function ProductPage() {
     }
   };
 
-  const openEditDialog = (suite: typeof testSuites extends Array<infer T> ? T : never) => {
+  const openEditDialog = (suite: NonNullable<typeof testSuites>[number]) => {
     setEditingSuite({
       id: suite.id,
       name: suite.name,

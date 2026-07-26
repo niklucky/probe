@@ -49,7 +49,7 @@ export function RegisterPage() {
             Create an account
           </CardTitle>
           <CardDescription>
-            Enter your details to get started with Signal
+            Enter your details to get started with Probe
           </CardDescription>
         </CardHeader>
         <CardContent>

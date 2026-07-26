@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../trpc';
-import { db, users, eq, like } from '@signal/db';
+import { db, users, eq, like } from '@probe/db';
 import { TRPCError } from '@trpc/server';
 import bcrypt from 'bcryptjs';
 

@@ -1,4 +1,4 @@
-# Signal - Test Management Platform
+# Probe - Test Management Platform
 
 A modern, user-friendly test management application for QA engineers and teams. Built with TypeScript, Bun, React, and PostgreSQL.
 
@@ -14,7 +14,7 @@ A modern, user-friendly test management application for QA engineers and teams. 
 - **Test Runs**: Execute tests and track results
 
 ### Versioning System
-Unlike traditional test management tools, Signal implements a robust versioning system:
+Unlike traditional test management tools, Probe implements a robust versioning system:
 - **Test Suites**: Every edit creates a new version, preserving history
 - **Test Cases**: Linked to specific suite versions, maintaining test integrity over time
 - **Test Runs**: Reference specific test case versions, enabling accurate historical reporting
@@ -41,7 +41,7 @@ Unlike traditional test management tools, Signal implements a robust versioning 
 ## Project Structure
 
 ```
-signal/
+probe/
 ├── apps/
 │   ├── api/              # Hono + tRPC backend
 │   └── web/              # React + Vite frontend
@@ -64,7 +64,7 @@ signal/
 
 ```bash
 git clone <repository>
-cd signal
+cd probe
 bun install
 ```
 
@@ -106,10 +106,10 @@ Or run individually:
 
 ```bash
 # Terminal 1: API
-bun run --filter=@signal/api dev
+bun run --filter=@probe/api dev
 
 # Terminal 2: Web
-bun run --filter=@signal/web dev
+bun run --filter=@probe/web dev
 ```
 
 ### 5. Access the App
@@ -136,6 +136,19 @@ MINIO_BUCKET=signal-assets
 MINIO_PUBLIC_URL=http://localhost:11002
 FRONTEND_URL=http://localhost:11020
 ```
+
+### Legacy-compatible local defaults
+
+Probe intentionally keeps the existing `signal` database user, database name,
+MinIO credentials, and `signal-assets` bucket as its local defaults. These values
+are infrastructure identifiers rather than product branding. Keeping them avoids
+disconnecting existing local installations from their persisted PostgreSQL and
+MinIO data after an upgrade.
+
+New installations may choose Probe-specific values by setting `DATABASE_URL`,
+`MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `MINIO_BUCKET` consistently in the
+API environment and Docker Compose configuration. Existing installations do not
+need a data migration or reset for this rename.
 
 ### apps/web/.env
 ```env

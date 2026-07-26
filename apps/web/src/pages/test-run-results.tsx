@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
@@ -18,9 +17,7 @@ import {
   Clock,
   AlertCircle,
   BarChart3,
-  FileText,
   RotateCcw,
-  Download
 } from 'lucide-react';
 
 export function TestRunResultsPage() {

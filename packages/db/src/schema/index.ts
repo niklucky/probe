@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, serial, varchar, text, timestamp, integer, boolean, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgEnum, pgTable, serial, varchar, text, timestamp, integer, jsonb, index } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Enums
@@ -16,7 +16,10 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }).notNull(),
   role: userRoleEnum('role').notNull().default('viewer'),
   avatarUrl: varchar('avatar_url', { length: 500 }),
-  avatarType: varchar('avatar_type', { length: 50 }), // 'predefined' or 'custom'
+  avatarType: varchar('avatar_type', {
+    length: 50,
+    enum: ['predefined', 'custom'],
+  }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

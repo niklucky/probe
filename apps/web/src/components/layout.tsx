@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { LogOut, User, Settings } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 
 export function Layout() {
   const { user, logout } = useAuth();
@@ -25,9 +25,9 @@ export function Layout() {
           <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center gap-2 font-bold text-xl">
               <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-sm">S</span>
+                <span className="text-primary-foreground font-bold text-sm">P</span>
               </div>
-              <span>Signal</span>
+              <span>Probe</span>
             </Link>
             
             {location.pathname !== '/' && (

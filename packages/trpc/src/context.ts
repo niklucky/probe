@@ -1,4 +1,4 @@
-import { User } from '@signal/shared';
+import { User } from '@probe/shared';
 
 export interface Context {
   user: User | null;

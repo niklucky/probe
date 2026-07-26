@@ -1,5 +1,5 @@
 {
-  "name": "@signal/shared",
+  "name": "@probe/shared",
   "version": "0.0.0",
   "private": true,
   "main": "./src/index.ts",
@@ -9,7 +9,7 @@
     "check-types": "tsc --noEmit"
   },
   "devDependencies": {
-    "@signal/typescript-config": "*",
+    "@probe/typescript-config": "*",
     "typescript": "^5.6.3"
   }
 }

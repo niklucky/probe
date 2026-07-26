@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
@@ -196,21 +196,6 @@ export function TestRunCreatePage() {
   const selectAllProductTests = () => {
     if (!selectedProductId) return;
     setShouldFetchAll(true);
-  };
-
-  // Count selected tests in current product
-  const getSelectedCountInProduct = () => {
-    if (!testSuites) return 0;
-    const suiteIds = testSuites.map(s => s.id);
-    return selectedTestCases.filter(tc => suiteIds.includes(tc.suiteId)).length;
-  };
-
-  // Check if all tests in product are selected
-  const areAllProductTestsSelected = () => {
-    // This would require knowing the total count, which we don't have without fetching all
-    // For now, just show indeterminate state if some are selected
-    const count = getSelectedCountInProduct();
-    return count > 0 && count === selectedTestCases.length;
   };
 
   const handleCreateRun = () => {
