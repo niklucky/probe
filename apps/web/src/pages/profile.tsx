@@ -50,22 +50,14 @@ export function ProfilePage() {
   
   const updateProfile = trpc.users.updateProfile.useMutation({
     onSuccess: (updatedUser) => {
-      setUser({
-        ...updatedUser,
-        createdAt: updatedUser.createdAt.toISOString(),
-        updatedAt: updatedUser.updatedAt.toISOString(),
-      });
+      setUser(updatedUser);
       utils.users.getProfile.invalidate();
     },
   });
   
   const updateAvatar = trpc.users.updateAvatar.useMutation({
     onSuccess: (updatedUser) => {
-      setUser({
-        ...updatedUser,
-        createdAt: updatedUser.createdAt.toISOString(),
-        updatedAt: updatedUser.updatedAt.toISOString(),
-      });
+      setUser(updatedUser);
       utils.users.getProfile.invalidate();
     },
   });

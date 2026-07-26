@@ -23,8 +23,8 @@ export interface User {
   role: UserRole;
   avatarUrl: string | null;
   avatarType: 'predefined' | 'custom' | null;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Project {

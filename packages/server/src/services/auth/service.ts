@@ -1,25 +1,12 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { AppError } from '@probe/shared/errors/app-error';
-import type { User } from '@probe/shared';
 import type { createUserRepository } from '../../repositories/users/repository';
 
 type Repository = ReturnType<typeof createUserRepository>;
 
 const jwtSecret =
   process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
-
-type PublicUser = NonNullable<
-  Awaited<ReturnType<Repository['findPublicById']>>
->;
-
-function toContextUser(user: PublicUser): User {
-  return {
-    ...user,
-    createdAt: user.createdAt.toISOString(),
-    updatedAt: user.updatedAt.toISOString(),
-  };
-}
 
 export function createAuthService(repository: Repository) {
   function issueToken(user: { id: number; email: string }) {
@@ -39,7 +26,7 @@ export function createAuthService(repository: Repository) {
         name: input.name,
         role: 'viewer',
       });
-      return { token: issueToken(user), user: toContextUser(user) };
+      return { token: issueToken(user), user };
     },
 
     async login(input: { email: string; password: string }) {
@@ -49,15 +36,14 @@ export function createAuthService(repository: Repository) {
       }
       return {
         token: issueToken(user),
-        user: toContextUser(user),
+        user,
       };
     },
 
-    async resolveUser(token: string): Promise<User | null> {
+    async resolveUser(token: string) {
       try {
         const payload = jwt.verify(token, jwtSecret) as { userId: number };
-        const user = await repository.findPublicById(payload.userId);
-        return user ? toContextUser(user) : null;
+        return (await repository.findPublicById(payload.userId)) ?? null;
       } catch {
         return null;
       }
