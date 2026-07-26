@@ -1,12 +1,20 @@
-export type UserRole = 'admin' | 'qa' | 'manual_tester' | 'viewer';
+import {
+  productTypes,
+  resultStatuses,
+  testPriorities,
+  testStatuses,
+  userRoles,
+} from './enums';
 
-export type ProductType = 'website' | 'mobile_app' | 'server' | 'api' | 'desktop_app' | 'other';
+export type UserRole = (typeof userRoles)[number];
 
-export type TestPriority = 'low' | 'medium' | 'high' | 'critical';
+export type ProductType = (typeof productTypes)[number];
 
-export type TestStatus = 'draft' | 'ready' | 'deprecated';
+export type TestPriority = (typeof testPriorities)[number];
 
-export type ResultStatus = 'passed' | 'failed' | 'skipped' | 'blocked' | 'not_run';
+export type TestStatus = (typeof testStatuses)[number];
+
+export type ResultStatus = (typeof resultStatuses)[number];
 
 export interface User {
   id: number;
@@ -60,7 +68,7 @@ export interface TeamMember {
 
 export interface TestSuite {
   id: number;
-  projectId: number;
+  productId: number;
   name: string;
   description: string | null;
   currentVersionId: number | null;
