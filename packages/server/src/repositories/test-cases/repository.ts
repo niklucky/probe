@@ -5,6 +5,7 @@ import {
   testCases,
   testCaseVersions,
   testSuites,
+  testSuiteVersions,
 } from '@probe/db';
 
 type Database = typeof db;
@@ -43,6 +44,13 @@ function bindTestCaseRepository(database: Database) {
       });
     },
 
+    findSuiteVersion(id: number) {
+      return database.query.testSuiteVersions.findFirst({
+        where: eq(testSuiteVersions.id, id),
+        columns: { id: true, suiteId: true },
+      });
+    },
+
     async findById(id: number) {
       return await database.query.testCases.findFirst({
         where: eq(testCases.id, id),
@@ -69,12 +77,18 @@ function bindTestCaseRepository(database: Database) {
     },
 
     async createCase(values: typeof testCases.$inferInsert) {
-      const [testCase] = await database.insert(testCases).values(values).returning();
+      const [testCase] = await database
+        .insert(testCases)
+        .values(values)
+        .returning();
       return testCase;
     },
 
     async createVersion(values: typeof testCaseVersions.$inferInsert) {
-      const [version] = await database.insert(testCaseVersions).values(values).returning();
+      const [version] = await database
+        .insert(testCaseVersions)
+        .values(values)
+        .returning();
       return version;
     },
 
@@ -97,7 +111,6 @@ function bindTestCaseRepository(database: Database) {
     async delete(id: number) {
       await database.delete(testCases).where(eq(testCases.id, id));
     },
-
   };
 }
 

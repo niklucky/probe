@@ -8,6 +8,7 @@ import { testSuitesRouter } from './routers/test-suites';
 import { testCasesRouter } from './routers/test-cases';
 import { testRunsRouter } from './routers/test-runs';
 import { filesRouter } from './routers/files';
+import { environmentsRouter } from './routers/environments';
 
 export const appRouter = router({
   auth: authRouter,
@@ -19,6 +20,7 @@ export const appRouter = router({
   testCases: testCasesRouter,
   testRuns: testRunsRouter,
   files: filesRouter,
+  environments: environmentsRouter,
 });
 
 export type AppRouter = typeof appRouter;

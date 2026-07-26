@@ -4,30 +4,68 @@ import type {
 } from '@probe/shared/schemas/test-cases';
 import { AppError } from '@probe/shared/errors/app-error';
 import type { TestCaseRepository } from '../../repositories/test-cases/repository';
+import type { AuthorizationService } from '../authorization/service';
 
-export function createTestCaseService(repository: TestCaseRepository) {
+const structuredSteps = (
+  steps: Array<string | { action: string; expectedResult?: string }>,
+) => steps.map((step) => (typeof step === 'string' ? { action: step } : step));
+
+const normalizeVersion = <
+  T extends {
+    steps: Array<string | { action: string; expectedResult?: string }>;
+  },
+>(
+  version: T,
+): Omit<T, 'steps'> & {
+  steps: Array<{ action: string; expectedResult?: string }>;
+} => ({ ...version, steps: structuredSteps(version.steps) });
+
+export function createTestCaseService(
+  repository: TestCaseRepository,
+  authorization: AuthorizationService,
+) {
   return {
-    async list(input: { suiteId: number; versionId?: number }) {
+    async list(input: { suiteId: number; versionId?: number }, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'suite', id: input.suiteId },
+        'read',
+      );
       if (input.versionId) {
+        const suiteVersion = await repository.findSuiteVersion(input.versionId);
+        if (!suiteVersion || suiteVersion.suiteId !== input.suiteId) {
+          throw new AppError('NOT_FOUND', 'Suite version not found');
+        }
         const versions = await repository.listBySuiteVersion(input.versionId);
         return versions.map(({ testCase, ...version }) => ({
           ...testCase,
-          versions: [version],
-          currentVersion: version,
+          versions: [normalizeVersion(version)],
+          currentVersion: normalizeVersion(version),
         }));
       }
 
       const testCases = await repository.listCurrentBySuite(input.suiteId);
       return testCases.map((testCase) => ({
         ...testCase,
-        currentVersion: testCase.versions[0],
+        versions: testCase.versions.map(normalizeVersion),
+        currentVersion: testCase.versions[0]
+          ? normalizeVersion(testCase.versions[0])
+          : undefined,
       }));
     },
 
-    async listByProduct(productId: number) {
+    async listByProduct(productId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'product', id: productId },
+        'read',
+      );
       const suites = await repository.listSuitesByProduct(productId);
       if (suites.length === 0) {
-        throw new AppError('NOT_FOUND', 'No test suites found for this product');
+        throw new AppError(
+          'NOT_FOUND',
+          'No test suites found for this product',
+        );
       }
 
       return Promise.all(
@@ -38,7 +76,10 @@ export function createTestCaseService(repository: TestCaseRepository) {
             suiteName: suite.name,
             testCases: testCases.map((testCase) => ({
               ...testCase,
-              currentVersion: testCase.versions[0],
+              versions: testCase.versions.map(normalizeVersion),
+              currentVersion: testCase.versions[0]
+                ? normalizeVersion(testCase.versions[0])
+                : undefined,
             })),
           };
         }),
@@ -46,6 +87,11 @@ export function createTestCaseService(repository: TestCaseRepository) {
     },
 
     async create(input: CreateTestCaseInput, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'suite', id: input.suiteId },
+        'author',
+      );
       return repository.withTransaction(async (transactionRepository) => {
         const suite = await transactionRepository.findSuite(input.suiteId);
         if (!suite) {
@@ -66,10 +112,11 @@ export function createTestCaseService(repository: TestCaseRepository) {
           versionNumber: 1,
           title: input.title,
           description: input.description ?? null,
+          prerequisites: input.prerequisites,
           steps: input.steps,
-          expectedResult: input.expectedResult ?? null,
+          expectedResult: input.expectedResult,
           priority: input.priority,
-          status: 'draft',
+          status: input.status,
           tags: input.tags,
           createdById: userId,
         });
@@ -82,15 +129,30 @@ export function createTestCaseService(repository: TestCaseRepository) {
       });
     },
 
-    async get(id: number) {
+    async get(id: number, userId: number, versionId?: number) {
+      await authorization.require(userId, { type: 'case', id }, 'read');
       const testCase = await repository.findById(id);
       if (!testCase) {
         throw new AppError('NOT_FOUND', 'Test case not found');
       }
-      return testCase;
+      const versions = testCase.versions.map(normalizeVersion);
+      if (versionId && !versions.some((version) => version.id === versionId)) {
+        throw new AppError('NOT_FOUND', 'Test case version not found');
+      }
+      return {
+        ...testCase,
+        versions,
+        currentVersion:
+          versions.find((version) => version.id === versionId) ?? versions[0],
+      };
     },
 
     async update(input: UpdateTestCaseInput, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'case', id: input.id },
+        'author',
+      );
       return repository.withTransaction(async (transactionRepository) => {
         const testCase = await transactionRepository.findForUpdate(input.id);
         if (!testCase) {
@@ -107,12 +169,15 @@ export function createTestCaseService(repository: TestCaseRepository) {
           versionNumber: latest ? latest.versionNumber + 1 : 1,
           title: input.title ?? latest?.title ?? '',
           description:
-            input.description !== undefined ? input.description : latest?.description,
+            input.description !== undefined
+              ? input.description
+              : latest?.description,
+          prerequisites: input.prerequisites ?? latest?.prerequisites ?? [],
           steps: input.steps ?? latest?.steps ?? [],
           expectedResult:
             input.expectedResult !== undefined
               ? input.expectedResult
-              : latest?.expectedResult,
+              : (latest?.expectedResult ?? ''),
           priority: input.priority ?? latest?.priority ?? 'medium',
           status: input.status ?? latest?.status ?? 'draft',
           tags: input.tags ?? latest?.tags ?? [],
@@ -126,11 +191,17 @@ export function createTestCaseService(repository: TestCaseRepository) {
       });
     },
 
-    listVersions(testCaseId: number) {
-      return repository.listVersions(testCaseId);
+    async listVersions(testCaseId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'case', id: testCaseId },
+        'read',
+      );
+      return (await repository.listVersions(testCaseId)).map(normalizeVersion);
     },
 
-    async delete(id: number) {
+    async delete(id: number, userId: number) {
+      await authorization.require(userId, { type: 'case', id }, 'author');
       await repository.delete(id);
       return { success: true };
     },

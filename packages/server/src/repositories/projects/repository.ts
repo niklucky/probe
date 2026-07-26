@@ -1,22 +1,26 @@
-import { and, db, eq, projects } from '@probe/db';
+import { db, eq, inArray, projects } from '@probe/db';
 
 export function createProjectRepository(database = db) {
   return {
-    listByOwner(createdById: number) {
+    listAccessible(ids: number[]) {
+      if (ids.length === 0) return Promise.resolve([]);
       return database.query.projects.findMany({
-        where: eq(projects.createdById, createdById),
+        where: inArray(projects.id, ids),
         orderBy: (table, { desc }) => [desc(table.updatedAt)],
       });
     },
 
-    findOwned(id: number, createdById: number) {
+    find(id: number) {
       return database.query.projects.findFirst({
-        where: and(eq(projects.id, id), eq(projects.createdById, createdById)),
+        where: eq(projects.id, id),
       });
     },
 
     async create(values: typeof projects.$inferInsert) {
-      const [project] = await database.insert(projects).values(values).returning();
+      const [project] = await database
+        .insert(projects)
+        .values(values)
+        .returning();
       return project;
     },
 

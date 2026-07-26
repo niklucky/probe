@@ -1,6 +1,7 @@
 import { AppError } from '@probe/shared/errors/app-error';
 import type { Client } from 'minio';
 import type { createFileRepository } from '../../repositories/files/repository';
+import type { AuthorizationService } from '../authorization/service';
 
 type Repository = ReturnType<typeof createFileRepository>;
 
@@ -8,7 +9,21 @@ export function createFileService(
   repository: Repository,
   storage: Client,
   bucketName: string,
+  authorization: AuthorizationService,
 ) {
+  const entityResource = (
+    entityType: string,
+    entityId: number,
+  ): { type: 'caseVersion' | 'result'; id: number } => {
+    if (entityType === 'test_case_version') {
+      return { type: 'caseVersion', id: entityId };
+    }
+    if (entityType === 'test_result') {
+      return { type: 'result', id: entityId };
+    }
+    throw new AppError('BAD_REQUEST', 'Unsupported file entity');
+  };
+
   return {
     async getLegacyUploadUrl(filename: string) {
       const objectName = `uploads/${Date.now()}-${filename}`;
@@ -29,8 +44,25 @@ export function createFileService(
         );
       }
     },
-    async getUploadUrl(userId: number, filename: string) {
-      const objectName = `${userId}/${Date.now()}_${filename}`;
+    async getUploadUrl(
+      userId: number,
+      input:
+        | { purpose: 'profile_avatar'; filename: string }
+        | {
+            purpose: 'attachment';
+            filename: string;
+            entityType: 'test_case_version' | 'test_result';
+            entityId: number;
+          },
+    ) {
+      if (input.purpose === 'attachment') {
+        await authorization.require(
+          userId,
+          entityResource(input.entityType, input.entityId),
+          input.entityType === 'test_case_version' ? 'author' : 'execute',
+        );
+      }
+      const objectName = `${userId}/${Date.now()}_${input.filename}`;
       try {
         return {
           presignedUrl: await storage.presignedPutObject(
@@ -48,17 +80,33 @@ export function createFileService(
         );
       }
     },
-    save(
+    async save(
       input: Omit<Parameters<Repository['create']>[0], 'createdById'>,
       userId: number,
     ) {
+      await authorization.require(
+        userId,
+        entityResource(input.entityType, input.entityId),
+        input.entityType === 'test_case_version' ? 'author' : 'execute',
+      );
       return repository.create({ ...input, createdById: userId });
     },
-    list: (entityType: string, entityId: number) =>
-      repository.list(entityType, entityId),
-    async delete(id: number) {
+    async list(entityType: string, entityId: number, userId: number) {
+      await authorization.require(
+        userId,
+        entityResource(entityType, entityId),
+        'read',
+      );
+      return repository.list(entityType, entityId);
+    },
+    async delete(id: number, userId: number) {
       const file = await repository.find(id);
       if (!file) throw new AppError('NOT_FOUND', 'File not found');
+      await authorization.require(
+        userId,
+        entityResource(file.entityType, file.entityId),
+        file.entityType === 'test_case_version' ? 'author' : 'execute',
+      );
       try {
         await storage.removeObject(bucketName, file.filename);
       } catch (error) {
@@ -67,7 +115,8 @@ export function createFileService(
       await repository.delete(id);
       return { success: true };
     },
-    async getDownloadUrl(id: number) {
+    async getDownloadUrl(id: number, userId: number) {
+      await authorization.require(userId, { type: 'file', id }, 'read');
       const file = await repository.find(id);
       if (!file) throw new AppError('NOT_FOUND', 'File not found');
       try {

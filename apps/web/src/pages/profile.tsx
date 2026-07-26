@@ -103,6 +103,7 @@ export function ProfilePage() {
     try {
       // Get presigned URL from files router
       const { presignedUrl, publicUrl } = await getUploadUrl.mutateAsync({
+        purpose: 'profile_avatar',
         filename: file.name,
         contentType: file.type,
       });

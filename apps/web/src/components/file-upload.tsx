@@ -95,8 +95,11 @@ export function FileUpload({ entityType, entityId, onUploadComplete, existingFil
     try {
       // Get presigned URL
       const { presignedUrl, objectName, publicUrl } = await getUploadUrl.mutateAsync({
+        purpose: 'attachment',
         filename: file.name,
         contentType: file.type,
+        entityType,
+        entityId,
       });
 
       // Upload to MinIO

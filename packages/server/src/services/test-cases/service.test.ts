@@ -32,7 +32,9 @@ describe('test case service', () => {
           updatedAt: new Date(),
         };
       },
-      async createVersion(values: Parameters<typeof baseRepository.createVersion>[0]) {
+      async createVersion(
+        values: Parameters<typeof baseRepository.createVersion>[0],
+      ) {
         calls.push('createVersion');
         return {
           id: 17,
@@ -41,8 +43,9 @@ describe('test case service', () => {
           versionNumber: values.versionNumber,
           title: values.title,
           description: values.description ?? null,
+          prerequisites: values.prerequisites ?? [],
           steps: values.steps ?? [],
-          expectedResult: values.expectedResult ?? null,
+          expectedResult: values.expectedResult ?? '',
           priority: values.priority ?? 'medium',
           status: values.status ?? 'draft',
           tags: values.tags ?? [],
@@ -71,13 +74,30 @@ describe('test case service', () => {
         return operation(transactionRepository);
       },
     };
+    const authorization = {
+      async require() {
+        return { projectId: 1, role: 'qa' as const };
+      },
+    };
 
-    const result = await createTestCaseService(fakeRepository).create(
+    const result = await createTestCaseService(
+      fakeRepository,
+      authorization as never,
+    ).create(
       {
         suiteId: 7,
         title: 'Can log in',
-        steps: ['Open login', 'Submit credentials'],
+        prerequisites: ['A registered account'],
+        steps: [
+          { action: 'Open login' },
+          {
+            action: 'Submit credentials',
+            expectedResult: 'Dashboard is shown',
+          },
+        ],
+        expectedResult: 'The user is authenticated',
         priority: 'high',
+        status: 'ready',
         tags: ['auth'],
       },
       2,
@@ -92,5 +112,6 @@ describe('test case service', () => {
     ]);
     expect(result.currentVersion.id).toBe(17);
     expect(result.currentVersion.suiteVersionId).toBe(11);
+    expect(result.currentVersion.status).toBe('ready');
   });
 });

@@ -30,26 +30,31 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  ArrowLeft, 
-  Plus, 
-  FileText, 
-  CheckCircle, 
+import {
+  ArrowLeft,
+  Plus,
+  FileText,
+  CheckCircle,
   AlertCircle,
   Clock,
   MoreVertical,
   Trash2,
-  Edit
+  Edit,
 } from 'lucide-react';
 
 export function TestSuitePage() {
-  const { projectId, productId, suiteId } = useParams<{ projectId: string; productId: string; suiteId: string }>();
+  const { projectId, productId, suiteId } = useParams<{
+    projectId: string;
+    productId: string;
+    suiteId: string;
+  }>();
   // Create Dialog State
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newTestCase, setNewTestCase] = useState({
     title: '',
     description: '',
-    steps: [''],
+    prerequisites: [] as string[],
+    steps: [{ action: '', expectedResult: '' }],
     expectedResult: '',
     priority: 'medium' as const,
     status: 'draft' as const,
@@ -63,7 +68,8 @@ export function TestSuitePage() {
     id: number;
     title: string;
     description: string;
-    steps: string[];
+    prerequisites: string[];
+    steps: Array<{ action: string; expectedResult?: string }>;
     expectedResult: string;
     priority: 'low' | 'medium' | 'high' | 'critical';
     status: 'draft' | 'ready' | 'deprecated';
@@ -71,25 +77,28 @@ export function TestSuitePage() {
   } | null>(null);
   const [editTagInput, setEditTagInput] = useState('');
 
-  const { data: suite, isLoading: isLoadingSuite } = trpc.testSuites.get.useQuery(
-    { id: Number(suiteId) },
-    { enabled: !!suiteId }
-  );
+  const { data: suite, isLoading: isLoadingSuite } =
+    trpc.testSuites.get.useQuery(
+      { id: Number(suiteId) },
+      { enabled: !!suiteId },
+    );
 
-  const { data: product, isLoading: isLoadingProduct } = trpc.products.get.useQuery(
-    { id: Number(productId) },
-    { enabled: !!productId }
-  );
+  const { data: product, isLoading: isLoadingProduct } =
+    trpc.products.get.useQuery(
+      { id: Number(productId) },
+      { enabled: !!productId },
+    );
 
   const { data: project } = trpc.projects.get.useQuery(
     { id: Number(projectId) },
-    { enabled: !!projectId }
+    { enabled: !!projectId },
   );
 
-  const { data: testCases, isLoading: isLoadingCases } = trpc.testCases.list.useQuery(
-    { suiteId: Number(suiteId) },
-    { enabled: !!suiteId }
-  );
+  const { data: testCases, isLoading: isLoadingCases } =
+    trpc.testCases.list.useQuery(
+      { suiteId: Number(suiteId) },
+      { enabled: !!suiteId },
+    );
 
   const utils = trpc.useContext();
 
@@ -100,7 +109,8 @@ export function TestSuitePage() {
       setNewTestCase({
         title: '',
         description: '',
-        steps: [''],
+        prerequisites: [],
+        steps: [{ action: '', expectedResult: '' }],
         expectedResult: '',
         priority: 'medium',
         status: 'draft',
@@ -125,7 +135,10 @@ export function TestSuitePage() {
 
   // Create form handlers
   const handleAddStep = () => {
-    setNewTestCase({ ...newTestCase, steps: [...newTestCase.steps, ''] });
+    setNewTestCase({
+      ...newTestCase,
+      steps: [...newTestCase.steps, { action: '', expectedResult: '' }],
+    });
   };
 
   const handleRemoveStep = (index: number) => {
@@ -135,34 +148,54 @@ export function TestSuitePage() {
     });
   };
 
-  const handleStepChange = (index: number, value: string) => {
+  const handleStepChange = (
+    index: number,
+    field: 'action' | 'expectedResult',
+    value: string,
+  ) => {
     const newSteps = [...newTestCase.steps];
-    newSteps[index] = value;
+    newSteps[index] = { ...newSteps[index], [field]: value };
     setNewTestCase({ ...newTestCase, steps: newSteps });
   };
 
   const handleAddTag = () => {
     if (tagInput.trim() && !newTestCase.tags.includes(tagInput.trim())) {
-      setNewTestCase({ ...newTestCase, tags: [...newTestCase.tags, tagInput.trim()] });
+      setNewTestCase({
+        ...newTestCase,
+        tags: [...newTestCase.tags, tagInput.trim()],
+      });
       setTagInput('');
     }
   };
 
   const handleRemoveTag = (tag: string) => {
-    setNewTestCase({ ...newTestCase, tags: newTestCase.tags.filter((t) => t !== tag) });
+    setNewTestCase({
+      ...newTestCase,
+      tags: newTestCase.tags.filter((t) => t !== tag),
+    });
   };
 
   const handleCreateTestCase = (e: React.FormEvent) => {
     e.preventDefault();
-    const filteredSteps = newTestCase.steps.filter((s) => s.trim());
-    if (newTestCase.title.trim() && filteredSteps.length > 0) {
+    const filteredSteps = newTestCase.steps.filter((step) =>
+      step.action.trim(),
+    );
+    if (
+      newTestCase.title.trim() &&
+      newTestCase.expectedResult.trim() &&
+      filteredSteps.length > 0
+    ) {
       createTestCase.mutate({
         suiteId: Number(suiteId),
         title: newTestCase.title,
         description: newTestCase.description || undefined,
+        prerequisites: newTestCase.prerequisites.filter((value) =>
+          value.trim(),
+        ),
         steps: filteredSteps,
-        expectedResult: newTestCase.expectedResult || undefined,
+        expectedResult: newTestCase.expectedResult,
         priority: newTestCase.priority,
+        status: newTestCase.status,
         tags: newTestCase.tags,
       });
     }
@@ -172,13 +205,17 @@ export function TestSuitePage() {
   const openEditDialog = (testCase: NonNullable<typeof testCases>[number]) => {
     const currentVersion = testCase.currentVersion || testCase.versions?.[0];
     if (!currentVersion) return;
-    
+
     setEditingTestCase({
       id: testCase.id,
       title: currentVersion.title,
       description: currentVersion.description || '',
-      steps: currentVersion.steps.length > 0 ? currentVersion.steps : [''],
-      expectedResult: currentVersion.expectedResult || '',
+      prerequisites: currentVersion.prerequisites,
+      steps:
+        currentVersion.steps.length > 0
+          ? currentVersion.steps
+          : [{ action: '', expectedResult: '' }],
+      expectedResult: currentVersion.expectedResult,
       priority: currentVersion.priority,
       status: currentVersion.status,
       tags: currentVersion.tags,
@@ -188,7 +225,10 @@ export function TestSuitePage() {
 
   const handleEditAddStep = () => {
     if (editingTestCase) {
-      setEditingTestCase({ ...editingTestCase, steps: [...editingTestCase.steps, ''] });
+      setEditingTestCase({
+        ...editingTestCase,
+        steps: [...editingTestCase.steps, { action: '', expectedResult: '' }],
+      });
     }
   };
 
@@ -201,38 +241,61 @@ export function TestSuitePage() {
     }
   };
 
-  const handleEditStepChange = (index: number, value: string) => {
+  const handleEditStepChange = (
+    index: number,
+    field: 'action' | 'expectedResult',
+    value: string,
+  ) => {
     if (editingTestCase) {
       const newSteps = [...editingTestCase.steps];
-      newSteps[index] = value;
+      newSteps[index] = { ...newSteps[index], [field]: value };
       setEditingTestCase({ ...editingTestCase, steps: newSteps });
     }
   };
 
   const handleEditAddTag = () => {
-    if (editTagInput.trim() && editingTestCase && !editingTestCase.tags.includes(editTagInput.trim())) {
-      setEditingTestCase({ ...editingTestCase, tags: [...editingTestCase.tags, editTagInput.trim()] });
+    if (
+      editTagInput.trim() &&
+      editingTestCase &&
+      !editingTestCase.tags.includes(editTagInput.trim())
+    ) {
+      setEditingTestCase({
+        ...editingTestCase,
+        tags: [...editingTestCase.tags, editTagInput.trim()],
+      });
       setEditTagInput('');
     }
   };
 
   const handleEditRemoveTag = (tag: string) => {
     if (editingTestCase) {
-      setEditingTestCase({ ...editingTestCase, tags: editingTestCase.tags.filter((t) => t !== tag) });
+      setEditingTestCase({
+        ...editingTestCase,
+        tags: editingTestCase.tags.filter((t) => t !== tag),
+      });
     }
   };
 
   const handleUpdateTestCase = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingTestCase && editingTestCase.title.trim()) {
-      const filteredSteps = editingTestCase.steps.filter((s) => s.trim());
+    if (
+      editingTestCase &&
+      editingTestCase.title.trim() &&
+      editingTestCase.expectedResult.trim()
+    ) {
+      const filteredSteps = editingTestCase.steps.filter((step) =>
+        step.action.trim(),
+      );
       if (filteredSteps.length > 0) {
         updateTestCase.mutate({
           id: editingTestCase.id,
           title: editingTestCase.title,
           description: editingTestCase.description || undefined,
+          prerequisites: editingTestCase.prerequisites.filter((value) =>
+            value.trim(),
+          ),
           steps: filteredSteps,
-          expectedResult: editingTestCase.expectedResult || undefined,
+          expectedResult: editingTestCase.expectedResult,
           priority: editingTestCase.priority,
           status: editingTestCase.status,
           tags: editingTestCase.tags,
@@ -305,11 +368,23 @@ export function TestSuitePage() {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link to="/" className="hover:text-foreground">Projects</Link>
+            <Link to="/" className="hover:text-foreground">
+              Projects
+            </Link>
             <span>/</span>
-            <Link to={`/projects/${projectId}`} className="hover:text-foreground">{project?.name || 'Project'}</Link>
+            <Link
+              to={`/projects/${projectId}`}
+              className="hover:text-foreground"
+            >
+              {project?.name || 'Project'}
+            </Link>
             <span>/</span>
-            <Link to={`/projects/${projectId}/products/${productId}`} className="hover:text-foreground">{product?.name || 'Product'}</Link>
+            <Link
+              to={`/projects/${projectId}/products/${productId}`}
+              className="hover:text-foreground"
+            >
+              {product?.name || 'Product'}
+            </Link>
             <span>/</span>
             <span>Test Suite</span>
           </div>
@@ -318,7 +393,9 @@ export function TestSuitePage() {
             <p className="text-sm text-muted-foreground">{product.name}</p>
           )}
           {suite.description && (
-            <p className="text-muted-foreground max-w-2xl">{suite.description}</p>
+            <p className="text-muted-foreground max-w-2xl">
+              {suite.description}
+            </p>
           )}
           <div className="flex items-center gap-2 pt-2">
             <Badge variant="outline">
@@ -336,7 +413,10 @@ export function TestSuitePage() {
               Back
             </Link>
           </Button>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <Dialog
+            open={isCreateDialogOpen}
+            onOpenChange={setIsCreateDialogOpen}
+          >
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -348,7 +428,8 @@ export function TestSuitePage() {
                 <DialogHeader>
                   <DialogTitle>Create Test Case</DialogTitle>
                   <DialogDescription>
-                    Add a new test case to this suite. Each edit creates a new version.
+                    Add a new test case to this suite. Each edit creates a new
+                    version.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -358,7 +439,12 @@ export function TestSuitePage() {
                       id="title"
                       placeholder="Test case title"
                       value={newTestCase.title}
-                      onChange={(e) => setNewTestCase({ ...newTestCase, title: e.target.value })}
+                      onChange={(e) =>
+                        setNewTestCase({
+                          ...newTestCase,
+                          title: e.target.value,
+                        })
+                      }
                       required
                     />
                   </div>
@@ -369,7 +455,12 @@ export function TestSuitePage() {
                       id="description"
                       placeholder="Brief description of what this test covers..."
                       value={newTestCase.description}
-                      onChange={(e) => setNewTestCase({ ...newTestCase, description: e.target.value })}
+                      onChange={(e) =>
+                        setNewTestCase({
+                          ...newTestCase,
+                          description: e.target.value,
+                        })
+                      }
                       rows={2}
                     />
                   </div>
@@ -380,7 +471,12 @@ export function TestSuitePage() {
                       <select
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                         value={newTestCase.priority}
-                        onChange={(e) => setNewTestCase({ ...newTestCase, priority: e.target.value as any })}
+                        onChange={(e) =>
+                          setNewTestCase({
+                            ...newTestCase,
+                            priority: e.target.value as any,
+                          })
+                        }
                       >
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
@@ -393,7 +489,12 @@ export function TestSuitePage() {
                       <select
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                         value={newTestCase.status}
-                        onChange={(e) => setNewTestCase({ ...newTestCase, status: e.target.value as any })}
+                        onChange={(e) =>
+                          setNewTestCase({
+                            ...newTestCase,
+                            status: e.target.value as any,
+                          })
+                        }
                       >
                         <option value="draft">Draft</option>
                         <option value="ready">Ready</option>
@@ -403,19 +504,53 @@ export function TestSuitePage() {
                   </div>
 
                   <div className="grid gap-2">
+                    <Label htmlFor="prerequisites">Prerequisites</Label>
+                    <Textarea
+                      id="prerequisites"
+                      placeholder="One prerequisite per line"
+                      value={newTestCase.prerequisites.join('\n')}
+                      onChange={(e) =>
+                        setNewTestCase({
+                          ...newTestCase,
+                          prerequisites: e.target.value.split('\n'),
+                        })
+                      }
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
                     <Label>Steps</Label>
                     <div className="space-y-2">
                       {newTestCase.steps.map((step, index) => (
-                        <div key={index} className="flex gap-2">
+                        <div key={index} className="flex items-start gap-2">
                           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted text-sm font-medium">
                             {index + 1}
                           </span>
-                          <Input
-                            placeholder={`Step ${index + 1}`}
-                            value={step}
-                            onChange={(e) => handleStepChange(index, e.target.value)}
-                            className="flex-1"
-                          />
+                          <div className="grid flex-1 gap-2">
+                            <Input
+                              placeholder="Action"
+                              value={step.action}
+                              onChange={(e) =>
+                                handleStepChange(
+                                  index,
+                                  'action',
+                                  e.target.value,
+                                )
+                              }
+                            />
+                            <Input
+                              placeholder="Expected result for this step (optional)"
+                              value={step.expectedResult || ''}
+                              onChange={(e) =>
+                                handleStepChange(
+                                  index,
+                                  'expectedResult',
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </div>
                           {newTestCase.steps.length > 1 && (
                             <Button
                               type="button"
@@ -428,7 +563,12 @@ export function TestSuitePage() {
                           )}
                         </div>
                       ))}
-                      <Button type="button" variant="outline" onClick={handleAddStep} className="w-full">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleAddStep}
+                        className="w-full"
+                      >
                         <Plus className="mr-2 h-4 w-4" />
                         Add Step
                       </Button>
@@ -441,8 +581,14 @@ export function TestSuitePage() {
                       id="expectedResult"
                       placeholder="What should happen when these steps are executed?"
                       value={newTestCase.expectedResult}
-                      onChange={(e) => setNewTestCase({ ...newTestCase, expectedResult: e.target.value })}
+                      onChange={(e) =>
+                        setNewTestCase({
+                          ...newTestCase,
+                          expectedResult: e.target.value,
+                        })
+                      }
                       rows={3}
+                      required
                     />
                   </div>
 
@@ -460,7 +606,11 @@ export function TestSuitePage() {
                           }
                         }}
                       />
-                      <Button type="button" variant="outline" onClick={handleAddTag}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleAddTag}
+                      >
                         Add
                       </Button>
                     </div>
@@ -479,14 +629,26 @@ export function TestSuitePage() {
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsCreateDialogOpen(false)}
+                  >
                     Cancel
                   </Button>
                   <Button
                     type="submit"
-                    disabled={createTestCase.isPending || !newTestCase.title.trim() || newTestCase.steps.filter(s => s.trim()).length === 0}
+                    disabled={
+                      createTestCase.isPending ||
+                      !newTestCase.title.trim() ||
+                      !newTestCase.expectedResult.trim() ||
+                      newTestCase.steps.filter((step) => step.action.trim())
+                        .length === 0
+                    }
                   >
-                    {createTestCase.isPending ? 'Creating...' : 'Create Test Case'}
+                    {createTestCase.isPending
+                      ? 'Creating...'
+                      : 'Create Test Case'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -513,7 +675,12 @@ export function TestSuitePage() {
                     id="edit-title"
                     placeholder="Test case title"
                     value={editingTestCase.title}
-                    onChange={(e) => setEditingTestCase({ ...editingTestCase, title: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTestCase({
+                        ...editingTestCase,
+                        title: e.target.value,
+                      })
+                    }
                     required
                   />
                 </div>
@@ -524,7 +691,12 @@ export function TestSuitePage() {
                     id="edit-description"
                     placeholder="Brief description of what this test covers..."
                     value={editingTestCase.description}
-                    onChange={(e) => setEditingTestCase({ ...editingTestCase, description: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTestCase({
+                        ...editingTestCase,
+                        description: e.target.value,
+                      })
+                    }
                     rows={2}
                   />
                 </div>
@@ -535,7 +707,12 @@ export function TestSuitePage() {
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                       value={editingTestCase.priority}
-                      onChange={(e) => setEditingTestCase({ ...editingTestCase, priority: e.target.value as any })}
+                      onChange={(e) =>
+                        setEditingTestCase({
+                          ...editingTestCase,
+                          priority: e.target.value as any,
+                        })
+                      }
                     >
                       <option value="low">Low</option>
                       <option value="medium">Medium</option>
@@ -548,7 +725,12 @@ export function TestSuitePage() {
                     <select
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                       value={editingTestCase.status}
-                      onChange={(e) => setEditingTestCase({ ...editingTestCase, status: e.target.value as any })}
+                      onChange={(e) =>
+                        setEditingTestCase({
+                          ...editingTestCase,
+                          status: e.target.value as any,
+                        })
+                      }
                     >
                       <option value="draft">Draft</option>
                       <option value="ready">Ready</option>
@@ -558,19 +740,53 @@ export function TestSuitePage() {
                 </div>
 
                 <div className="grid gap-2">
+                  <Label htmlFor="edit-prerequisites">Prerequisites</Label>
+                  <Textarea
+                    id="edit-prerequisites"
+                    placeholder="One prerequisite per line"
+                    value={editingTestCase.prerequisites.join('\n')}
+                    onChange={(e) =>
+                      setEditingTestCase({
+                        ...editingTestCase,
+                        prerequisites: e.target.value.split('\n'),
+                      })
+                    }
+                    rows={3}
+                  />
+                </div>
+
+                <div className="grid gap-2">
                   <Label>Steps</Label>
                   <div className="space-y-2">
                     {editingTestCase.steps.map((step, index) => (
-                      <div key={index} className="flex gap-2">
+                      <div key={index} className="flex items-start gap-2">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted text-sm font-medium">
                           {index + 1}
                         </span>
-                        <Input
-                          placeholder={`Step ${index + 1}`}
-                          value={step}
-                          onChange={(e) => handleEditStepChange(index, e.target.value)}
-                          className="flex-1"
-                        />
+                        <div className="grid flex-1 gap-2">
+                          <Input
+                            placeholder="Action"
+                            value={step.action}
+                            onChange={(e) =>
+                              handleEditStepChange(
+                                index,
+                                'action',
+                                e.target.value,
+                              )
+                            }
+                          />
+                          <Input
+                            placeholder="Expected result for this step (optional)"
+                            value={step.expectedResult || ''}
+                            onChange={(e) =>
+                              handleEditStepChange(
+                                index,
+                                'expectedResult',
+                                e.target.value,
+                              )
+                            }
+                          />
+                        </div>
                         {editingTestCase.steps.length > 1 && (
                           <Button
                             type="button"
@@ -583,7 +799,12 @@ export function TestSuitePage() {
                         )}
                       </div>
                     ))}
-                    <Button type="button" variant="outline" onClick={handleEditAddStep} className="w-full">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleEditAddStep}
+                      className="w-full"
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add Step
                     </Button>
@@ -596,8 +817,14 @@ export function TestSuitePage() {
                     id="edit-expectedResult"
                     placeholder="What should happen when these steps are executed?"
                     value={editingTestCase.expectedResult}
-                    onChange={(e) => setEditingTestCase({ ...editingTestCase, expectedResult: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTestCase({
+                        ...editingTestCase,
+                        expectedResult: e.target.value,
+                      })
+                    }
                     rows={3}
+                    required
                   />
                 </div>
 
@@ -615,7 +842,11 @@ export function TestSuitePage() {
                         }
                       }}
                     />
-                    <Button type="button" variant="outline" onClick={handleEditAddTag}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleEditAddTag}
+                    >
                       Add
                     </Button>
                   </div>
@@ -635,12 +866,22 @@ export function TestSuitePage() {
               </div>
             )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditDialogOpen(false)}
+              >
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={updateTestCase.isPending || !editingTestCase?.title.trim() || (editingTestCase?.steps.filter(s => s.trim()).length || 0) === 0}
+                disabled={
+                  updateTestCase.isPending ||
+                  !editingTestCase?.title.trim() ||
+                  !editingTestCase?.expectedResult.trim() ||
+                  (editingTestCase?.steps.filter((step) => step.action.trim())
+                    .length || 0) === 0
+                }
               >
                 {updateTestCase.isPending ? 'Saving...' : 'Save Changes'}
               </Button>
@@ -667,7 +908,8 @@ export function TestSuitePage() {
           ) : testCases && testCases.length > 0 ? (
             <div className="space-y-4">
               {testCases.map((testCase) => {
-                const currentVersion = testCase.currentVersion || testCase.versions?.[0];
+                const currentVersion =
+                  testCase.currentVersion || testCase.versions?.[0];
                 if (!currentVersion) return null;
 
                 return (
@@ -676,29 +918,45 @@ export function TestSuitePage() {
                       <div className="flex items-start justify-between">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">{currentVersion.title}</CardTitle>
-                            <Badge className={getPriorityColor(currentVersion.priority)}>
+                            <CardTitle className="text-base">
+                              {currentVersion.title}
+                            </CardTitle>
+                            <Badge
+                              className={getPriorityColor(
+                                currentVersion.priority,
+                              )}
+                            >
                               {currentVersion.priority}
                             </Badge>
                             {getStatusIcon(currentVersion.status)}
                           </div>
                           {currentVersion.description && (
-                            <CardDescription>{currentVersion.description}</CardDescription>
+                            <CardDescription>
+                              {currentVersion.description}
+                            </CardDescription>
                           )}
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                            >
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditDialog(testCase)}>
+                            <DropdownMenuItem
+                              onClick={() => openEditDialog(testCase)}
+                            >
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => deleteTestCase.mutate({ id: testCase.id })}
+                            <DropdownMenuItem
+                              onClick={() =>
+                                deleteTestCase.mutate({ id: testCase.id })
+                              }
                               className="text-destructive focus:text-destructive"
                               disabled={deleteTestCase.isPending}
                             >
@@ -711,7 +969,11 @@ export function TestSuitePage() {
                       {currentVersion.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 pt-2">
                           {currentVersion.tags.map((tag) => (
-                            <Badge key={tag} variant="outline" className="text-xs">
+                            <Badge
+                              key={tag}
+                              variant="outline"
+                              className="text-xs"
+                            >
                               {tag}
                             </Badge>
                           ))}
@@ -720,18 +982,43 @@ export function TestSuitePage() {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-3">
+                        {currentVersion.prerequisites.length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-medium mb-2">
+                              Prerequisites:
+                            </h4>
+                            <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                              {currentVersion.prerequisites.map(
+                                (prerequisite, idx) => (
+                                  <li key={idx}>{prerequisite}</li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+                        )}
                         <div>
                           <h4 className="text-sm font-medium mb-2">Steps:</h4>
-                          <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+                          <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
                             {currentVersion.steps.map((step, idx) => (
-                              <li key={idx}>{step}</li>
+                              <li key={idx}>
+                                {step.action}
+                                {step.expectedResult && (
+                                  <div className="ml-5 text-xs">
+                                    Expected: {step.expectedResult}
+                                  </div>
+                                )}
+                              </li>
                             ))}
                           </ol>
                         </div>
                         {currentVersion.expectedResult && (
                           <div>
-                            <h4 className="text-sm font-medium mb-1">Expected Result:</h4>
-                            <p className="text-sm text-muted-foreground">{currentVersion.expectedResult}</p>
+                            <h4 className="text-sm font-medium mb-1">
+                              Expected Result:
+                            </h4>
+                            <p className="text-sm text-muted-foreground">
+                              {currentVersion.expectedResult}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -746,9 +1033,13 @@ export function TestSuitePage() {
                 <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h3 className="text-lg font-medium">No test cases yet</h3>
                 <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                  Create your first test case to start documenting your tests. Each test case can have multiple steps and versions.
+                  Create your first test case to start documenting your tests.
+                  Each test case can have multiple steps and versions.
                 </p>
-                <Button onClick={() => setIsCreateDialogOpen(true)} className="mt-4">
+                <Button
+                  onClick={() => setIsCreateDialogOpen(true)}
+                  className="mt-4"
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   Create Test Case
                 </Button>
