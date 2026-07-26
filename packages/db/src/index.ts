@@ -1,4 +1,5 @@
 export * from './schema';
+export * from './types';
 export { db, runMigrations, testConnection, schema } from './client';
 export {
   eq,

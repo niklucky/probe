@@ -1,5 +1,5 @@
 import { trpcServer } from '@hono/trpc-server';
-import { appRouter, createContext, services } from '@probe/server';
+import { appRouter, createContext, serverEnv, services } from '@probe/server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -10,7 +10,7 @@ app.use(logger());
 app.use(
   '*',
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:11020',
+    origin: serverEnv.FRONTEND_URL,
     credentials: true,
   }),
 );

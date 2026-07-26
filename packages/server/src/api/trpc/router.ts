@@ -9,6 +9,7 @@ import { testCasesRouter } from './routers/test-cases';
 import { testRunsRouter } from './routers/test-runs';
 import { filesRouter } from './routers/files';
 import { environmentsRouter } from './routers/environments';
+import { aiConnectionsRouter } from './routers/ai-connections';
 
 export const appRouter = router({
   auth: authRouter,
@@ -21,6 +22,7 @@ export const appRouter = router({
   testRuns: testRunsRouter,
   files: filesRouter,
   environments: environmentsRouter,
+  aiConnections: aiConnectionsRouter,
 });
 
 export type AppRouter = typeof appRouter;

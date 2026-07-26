@@ -1,5 +1,5 @@
 {
-  "name": "@probe/server",
+  "name": "@probe/ai",
   "version": "0.0.0",
   "private": true,
   "main": "./src/index.ts",
@@ -10,20 +10,10 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@probe/ai": "*",
-    "@probe/db": "*",
-    "@probe/shared": "*",
-    "@trpc/server": "^11.0.0-rc.638",
-    "superjson": "^2.2.2",
-    "zod": "^3.24.0",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "minio": "^8.0.2"
+    "@probe/shared": "*"
   },
   "devDependencies": {
     "@probe/typescript-config": "*",
-    "@types/bcryptjs": "^3.0.0",
-    "@types/jsonwebtoken": "^9.0.7",
     "typescript": "^5.6.3"
   }
 }

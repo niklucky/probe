@@ -21,6 +21,10 @@ import { createAuthorizationRepository } from '../repositories/authorization/rep
 import { createAuthorizationService } from '../services/authorization/service';
 import { createEnvironmentRepository } from '../repositories/environments/repository';
 import { createEnvironmentService } from '../services/environments/service';
+import { createAiConnectionRepository } from '../repositories/ai-connections/repository';
+import { createAiConnectionService } from '../services/ai-connections/service';
+import { createCredentialCipher } from '../services/ai-connections/encryption';
+import { serverEnv } from '../env';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -28,24 +32,28 @@ export function createServices() {
     createAuthorizationRepository(),
   );
   const storage = new Client({
-    endPoint: process.env.MINIO_ENDPOINT || 'localhost',
-    port: Number.parseInt(process.env.MINIO_PORT || '11002'),
-    useSSL: process.env.MINIO_USE_SSL === 'true',
-    accessKey: process.env.MINIO_ACCESS_KEY || 'signal',
-    secretKey: process.env.MINIO_SECRET_KEY || 'signal_password',
+    endPoint: serverEnv.MINIO_ENDPOINT,
+    port: serverEnv.MINIO_PORT,
+    useSSL: serverEnv.MINIO_USE_SSL,
+    accessKey: serverEnv.MINIO_ACCESS_KEY,
+    secretKey: serverEnv.MINIO_SECRET_KEY,
   });
   return {
     auth: createAuthService(userRepository),
     files: createFileService(
       createFileRepository(),
       storage,
-      process.env.MINIO_BUCKET || 'signal-assets',
+      serverEnv.MINIO_BUCKET,
       authorization,
     ),
     authorization,
     environments: createEnvironmentService(
       createEnvironmentRepository(),
       authorization,
+    ),
+    aiConnections: createAiConnectionService(
+      createAiConnectionRepository(),
+      createCredentialCipher(),
     ),
     projects: createProjectService(createProjectRepository(), authorization),
     products: createProductService(createProductRepository(), authorization),
