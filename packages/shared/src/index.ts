@@ -4,3 +4,4 @@ export * from './errors/app-error';
 export * from './schemas/environments';
 export * from './schemas/ai-connections';
 export * from './schemas/test-cases';
+export * from './schemas/ai-authoring';

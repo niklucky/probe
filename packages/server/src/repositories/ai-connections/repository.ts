@@ -35,6 +35,15 @@ function bindAiConnectionRepository(database: Database) {
         .from(aiConnections)
         .orderBy(desc(aiConnections.isDefault), asc(aiConnections.name));
     },
+    listEnabledByScope(scope: typeof aiConnections.$inferSelect.scope) {
+      return database
+        .select(safeSelection)
+        .from(aiConnections)
+        .where(
+          and(eq(aiConnections.scope, scope), eq(aiConnections.enabled, true)),
+        )
+        .orderBy(desc(aiConnections.isDefault), asc(aiConnections.name));
+    },
     async find(id: number) {
       const [connection] = await database
         .select()

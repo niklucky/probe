@@ -34,6 +34,9 @@ function parseJsonText<T>(text: string | undefined): T {
     throw new AiProviderError(
       'INVALID_RESPONSE',
       'AI provider returned invalid structured data',
+      false,
+      undefined,
+      text,
     );
   }
 }
@@ -65,6 +68,14 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
     ): Promise<StructuredGenerationResult<T>> {
       const started = Date.now();
       try {
+        const supportsNativeJsonSchema =
+          config.provider === 'openai' ||
+          config.capabilities?.includes('native-json-schema');
+        const schemaInstruction = supportsNativeJsonSchema
+          ? ''
+          : `\n\nReturn only one JSON object matching this JSON Schema:\n${JSON.stringify(
+              request.schema,
+            )}`;
         const response = await fetcher(joinUrl(endpoint, 'chat/completions'), {
           method: 'POST',
           redirect: 'error',
@@ -75,17 +86,22 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
               ...(request.system
                 ? [{ role: 'system', content: request.system }]
                 : []),
-              { role: 'user', content: request.prompt },
+              {
+                role: 'user',
+                content: `${request.prompt}${schemaInstruction}`,
+              },
             ],
             temperature: request.temperature,
-            response_format: {
-              type: 'json_schema',
-              json_schema: {
-                name: request.schemaName || 'response',
-                strict: true,
-                schema: request.schema,
-              },
-            },
+            response_format: supportsNativeJsonSchema
+              ? {
+                  type: 'json_schema',
+                  json_schema: {
+                    name: request.schemaName || 'response',
+                    strict: true,
+                    schema: request.schema,
+                  },
+                }
+              : { type: 'json_object' },
           }),
         });
         if (!response.ok) {

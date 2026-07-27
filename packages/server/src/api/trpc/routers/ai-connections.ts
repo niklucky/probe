@@ -3,6 +3,7 @@ import {
   aiConnectionSchema,
   aiConnectionTestInputSchema,
   aiConnectionTestResultSchema,
+  aiConnectionScopeInputSchema,
   createAiConnectionInputSchema,
   updateAiConnectionInputSchema,
 } from '@probe/shared/schemas/ai-connections';
@@ -10,6 +11,12 @@ import { z } from 'zod';
 import { protectedProcedure, router } from '../../../trpc';
 
 export const aiConnectionsRouter = router({
+  available: protectedProcedure
+    .input(aiConnectionScopeInputSchema)
+    .output(z.array(aiConnectionSchema))
+    .query(({ ctx, input }) =>
+      ctx.services.aiConnections.listAvailable(input.scope),
+    ),
   list: protectedProcedure
     .output(z.array(aiConnectionSchema))
     .query(({ ctx }) => ctx.services.aiConnections.list(ctx.user)),

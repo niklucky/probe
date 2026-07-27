@@ -63,6 +63,17 @@ export const aiConnectionScopeEnum = pgEnum('ai_connection_scope', [
   'test-authoring',
   'test-execution',
 ]);
+export const aiAuthoringOperationEnum = pgEnum('ai_authoring_operation', [
+  'generate',
+  'improve',
+]);
+export const aiAuthoringJobStatusEnum = pgEnum('ai_authoring_job_status', [
+  'running',
+  'completed',
+  'accepted',
+  'discarded',
+  'failed',
+]);
 
 // Users table
 export const users = pgTable('users', {
@@ -322,6 +333,54 @@ export const testCaseVersions = pgTable(
   }),
 );
 
+// AI output is kept as an auditable proposal. It never becomes a test-case
+// version until an authorized user explicitly accepts a validated spec.
+export const aiAuthoringJobs = pgTable(
+  'ai_authoring_jobs',
+  {
+    id: serial('id').primaryKey(),
+    operation: aiAuthoringOperationEnum('operation').notNull(),
+    status: aiAuthoringJobStatusEnum('status').notNull().default('running'),
+    suiteId: integer('suite_id')
+      .references(() => testSuites.id, { onDelete: 'cascade' })
+      .notNull(),
+    testCaseId: integer('test_case_id').references(() => testCases.id, {
+      onDelete: 'cascade',
+    }),
+    connectionRef: varchar('connection_ref', { length: 255 }),
+    provider: aiProviderEnum('provider'),
+    model: varchar('model', { length: 255 }),
+    promptVersion: varchar('prompt_version', { length: 100 }).notNull(),
+    inputSnapshot: jsonb('input_snapshot')
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    outputSnapshot: jsonb('output_snapshot').$type<Record<string, unknown>>(),
+    latencyMs: integer('latency_ms'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    errorCode: varchar('error_code', { length: 100 }),
+    errorMessage: varchar('error_message', { length: 500 }),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    acceptedById: integer('accepted_by_id').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    acceptedAt: timestamp('accepted_at'),
+  },
+  (table) => ({
+    suiteIndex: index('ai_authoring_jobs_suite_index').on(table.suiteId),
+    testCaseIndex: index('ai_authoring_jobs_test_case_index').on(
+      table.testCaseId,
+    ),
+    creatorIndex: index('ai_authoring_jobs_creator_index').on(
+      table.createdById,
+      table.createdAt,
+    ),
+  }),
+);
+
 // Test runs
 export const testRuns = pgTable('test_runs', {
   id: serial('id').primaryKey(),
@@ -419,6 +478,12 @@ export const usersRelations = relations(users, ({ many }) => ({
   testRuns: many(testRuns),
   aiConnections: many(aiConnections),
   aiConnectionAuditLogs: many(aiConnectionAuditLogs),
+  createdAiAuthoringJobs: many(aiAuthoringJobs, {
+    relationName: 'aiAuthoringJobCreator',
+  }),
+  acceptedAiAuthoringJobs: many(aiAuthoringJobs, {
+    relationName: 'aiAuthoringJobAcceptor',
+  }),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -510,6 +575,7 @@ export const testSuitesRelations = relations(testSuites, ({ one, many }) => ({
   }),
   versions: many(testSuiteVersions),
   testCases: many(testCases),
+  aiAuthoringJobs: many(aiAuthoringJobs),
 }));
 
 export const testSuiteVersionsRelations = relations(
@@ -537,7 +603,32 @@ export const testCasesRelations = relations(testCases, ({ one, many }) => ({
     references: [users.id],
   }),
   versions: many(testCaseVersions),
+  aiAuthoringJobs: many(aiAuthoringJobs),
 }));
+
+export const aiAuthoringJobsRelations = relations(
+  aiAuthoringJobs,
+  ({ one }) => ({
+    suite: one(testSuites, {
+      fields: [aiAuthoringJobs.suiteId],
+      references: [testSuites.id],
+    }),
+    testCase: one(testCases, {
+      fields: [aiAuthoringJobs.testCaseId],
+      references: [testCases.id],
+    }),
+    createdBy: one(users, {
+      fields: [aiAuthoringJobs.createdById],
+      references: [users.id],
+      relationName: 'aiAuthoringJobCreator',
+    }),
+    acceptedBy: one(users, {
+      fields: [aiAuthoringJobs.acceptedById],
+      references: [users.id],
+      relationName: 'aiAuthoringJobAcceptor',
+    }),
+  }),
+);
 
 export const testCaseVersionsRelations = relations(
   testCaseVersions,

@@ -4,14 +4,16 @@ import { createAiAdapter } from './adapters';
 describe('AI provider adapters', () => {
   test('normalizes OpenAI-compatible structured generation', async () => {
     const requests: Array<string | URL | Request> = [];
+    const requestBodies: unknown[] = [];
     const adapter = createAiAdapter(
       {
         provider: 'openai-compatible',
         endpoint: 'https://models.example/v1',
         model: 'local-model',
       },
-      async (input) => {
+      async (input, init) => {
         requests.push(input);
+        requestBodies.push(JSON.parse(String(init?.body)));
         return Response.json({
           model: 'local-model',
           choices: [{ message: { content: '{"answer":42}' } }],
@@ -36,6 +38,9 @@ describe('AI provider adapters', () => {
     expect(result.value).toEqual({ answer: 42 });
     expect(result.usage?.totalTokens).toBe(5);
     expect(String(requests[0])).toEndWith('/chat/completions');
+    expect(requestBodies[0]).toMatchObject({
+      response_format: { type: 'json_object' },
+    });
   });
 
   test('normalizes provider authentication failures without secrets', async () => {

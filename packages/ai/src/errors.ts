@@ -13,6 +13,9 @@ export class AiProviderError extends Error {
     message: string,
     public readonly retryable = false,
     public readonly status?: number,
+    // Kept out of messages/logs; authoring workflows may use it for one
+    // bounded repair request when a provider emits malformed JSON.
+    public readonly structuredOutput?: string,
   ) {
     super(message);
     this.name = 'AiProviderError';

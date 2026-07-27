@@ -22,6 +22,15 @@ export function createEnvironmentService(
   }
 
   return {
+    async get(id: number, userId: number) {
+      await authorization.require(userId, { type: 'environment', id }, 'read');
+      const environment = await repository.find(id);
+      if (!environment) {
+        throw new AppError('NOT_FOUND', 'Environment not found');
+      }
+      return environment;
+    },
+
     async list(
       input: { projectId: number; productId?: number },
       userId: number,
