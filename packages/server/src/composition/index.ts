@@ -27,6 +27,8 @@ import { createCredentialCipher } from '../services/ai-connections/encryption';
 import { serverEnv } from '../env';
 import { createAiAuthoringRepository } from '../repositories/ai-authoring/repository';
 import { createAiAuthoringService } from '../services/ai-authoring/service';
+import { createTestAutomationRepository } from '../repositories/test-automations/repository';
+import { createTestAutomationService } from '../services/test-automations/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -68,6 +70,12 @@ export function createServices() {
       authorization,
       aiConnections,
       testCases,
+      environments,
+    ),
+    testAutomations: createTestAutomationService(
+      createTestAutomationRepository(),
+      authorization,
+      aiConnections,
       environments,
     ),
     projects: createProjectService(createProjectRepository(), authorization),

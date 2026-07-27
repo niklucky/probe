@@ -32,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AiTestCaseDialog } from '@/components/ai-test-case-dialog';
+import { TestAutomationDialog } from '@/components/test-automation-dialog';
 import {
   ArrowLeft,
   Plus,
@@ -43,6 +44,7 @@ import {
   Trash2,
   Edit,
   Sparkles,
+  Code2,
 } from 'lucide-react';
 
 export function TestSuitePage() {
@@ -83,6 +85,12 @@ export function TestSuitePage() {
     mode: 'generate' | 'improve';
     testCaseId?: number;
     currentSpec?: TestSpec;
+  } | null>(null);
+  const [automationDialog, setAutomationDialog] = useState<{
+    testCaseId: number;
+    sourceTestCaseVersionId: number;
+    sourceVersionNumber: number;
+    canGenerate: boolean;
   } | null>(null);
 
   const { data: suite, isLoading: isLoadingSuite } =
@@ -996,6 +1004,21 @@ export function TestSuitePage() {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
+                                setAutomationDialog({
+                                  testCaseId: testCase.id,
+                                  sourceTestCaseVersionId: currentVersion.id,
+                                  sourceVersionNumber:
+                                    currentVersion.versionNumber,
+                                  canGenerate:
+                                    currentVersion.status === 'ready',
+                                })
+                              }
+                            >
+                              <Code2 className="mr-2 h-4 w-4" />
+                              Playwright automation
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
                                 deleteTestCase.mutate({ id: testCase.id })
                               }
                               className="text-destructive focus:text-destructive"
@@ -1104,6 +1127,17 @@ export function TestSuitePage() {
           onAccepted={() => {
             utils.testCases.list.invalidate({ suiteId: Number(suiteId) });
           }}
+        />
+      )}
+      {automationDialog && (
+        <TestAutomationDialog
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setAutomationDialog(null);
+          }}
+          projectId={Number(projectId)}
+          productId={Number(productId)}
+          {...automationDialog}
         />
       )}
     </div>
