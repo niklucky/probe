@@ -102,6 +102,12 @@ describe('AI test-case authoring', () => {
     );
 
     expect(calls).toHaveLength(2);
+    expect(
+      calls.every(
+        (request) =>
+          !Object.prototype.hasOwnProperty.call(request, 'temperature'),
+      ),
+    ).toBe(true);
     expect(result.proposal).toEqual(validSpec);
     expect(completed).toHaveLength(1);
   });

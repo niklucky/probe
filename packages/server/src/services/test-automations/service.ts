@@ -136,7 +136,6 @@ export function createTestAutomationService(
           prompt: automationPrompt(sourceVersion, environment),
           schema: automationSourceJsonSchema,
           schemaName: 'playwright_typescript_automation',
-          temperature: 0.1,
         });
         if (
           !result.value ||

@@ -97,7 +97,6 @@ export function createAiAuthoringService(
         prompt,
         schema: testSpecJsonSchema,
         schemaName: 'test_case',
-        temperature: 0.2,
       });
     } catch (error) {
       if (
@@ -114,7 +113,6 @@ export function createAiAuthoringService(
         ]),
         schema: testSpecJsonSchema,
         schemaName: 'test_case_repair',
-        temperature: 0,
       });
       const parsedRepair = testSpecSchema.safeParse(repaired.value);
       if (!parsedRepair.success) {
@@ -137,7 +135,6 @@ export function createAiAuthoringService(
       ),
       schema: testSpecJsonSchema,
       schemaName: 'test_case_repair',
-      temperature: 0,
     });
     const parsedRepair = testSpecSchema.safeParse(repaired.value);
     if (!parsedRepair.success) {
