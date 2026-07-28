@@ -22,7 +22,9 @@ export const testSpecJsonSchema = {
           action: { type: 'string', minLength: 1, maxLength: 5_000 },
           expectedResult: { type: 'string', maxLength: 5_000 },
         },
-        required: ['action'],
+        // Strict JSON-schema providers require every declared property here.
+        // An empty string represents a step without its own expected result.
+        required: ['action', 'expectedResult'],
       },
     },
     expectedResult: { type: 'string', minLength: 1, maxLength: 20_000 },
