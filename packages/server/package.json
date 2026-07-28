@@ -18,7 +18,9 @@
     "zod": "^3.24.0",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
-    "minio": "^8.0.2"
+    "minio": "^8.0.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.6.3"
   },
   "devDependencies": {
     "@probe/typescript-config": "*",

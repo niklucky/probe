@@ -74,6 +74,18 @@ export const aiAuthoringJobStatusEnum = pgEnum('ai_authoring_job_status', [
   'discarded',
   'failed',
 ]);
+export const automationFrameworkEnum = pgEnum('automation_framework', [
+  'playwright',
+]);
+export const automationLanguageEnum = pgEnum('automation_language', [
+  'typescript',
+]);
+export const automationStatusEnum = pgEnum('automation_status', [
+  'generated',
+  'accepted',
+  'discarded',
+  'failed',
+]);
 
 // Users table
 export const users = pgTable('users', {
@@ -381,6 +393,64 @@ export const aiAuthoringJobs = pgTable(
   }),
 );
 
+// Automation is versioned independently from the manual specification. Each
+// proposal keeps an immutable link to the exact test-case version it came from.
+export const testAutomations = pgTable(
+  'test_automations',
+  {
+    id: serial('id').primaryKey(),
+    testCaseId: integer('test_case_id')
+      .references(() => testCases.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceTestCaseVersionId: integer('source_test_case_version_id')
+      .references(() => testCaseVersions.id, { onDelete: 'restrict' })
+      .notNull(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'restrict' })
+      .notNull(),
+    versionNumber: integer('version_number').notNull(),
+    framework: automationFrameworkEnum('framework')
+      .notNull()
+      .default('playwright'),
+    language: automationLanguageEnum('language')
+      .notNull()
+      .default('typescript'),
+    status: automationStatusEnum('status').notNull().default('generated'),
+    source: text('source').notNull(),
+    connectionRef: varchar('connection_ref', { length: 255 }),
+    provider: aiProviderEnum('provider'),
+    model: varchar('model', { length: 255 }),
+    promptVersion: varchar('prompt_version', { length: 100 }).notNull(),
+    latencyMs: integer('latency_ms'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    validationError: varchar('validation_error', { length: 500 }),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    acceptedById: integer('accepted_by_id').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    acceptedAt: timestamp('accepted_at'),
+  },
+  (table) => ({
+    uniqueVersion: uniqueIndex('test_automations_unique_version').on(
+      table.testCaseId,
+      table.framework,
+      table.language,
+      table.versionNumber,
+    ),
+    caseIndex: index('test_automations_case_index').on(
+      table.testCaseId,
+      table.createdAt,
+    ),
+    sourceVersionIndex: index('test_automations_source_version_index').on(
+      table.sourceTestCaseVersionId,
+    ),
+  }),
+);
+
 // Test runs
 export const testRuns = pgTable('test_runs', {
   id: serial('id').primaryKey(),
@@ -484,6 +554,12 @@ export const usersRelations = relations(users, ({ many }) => ({
   acceptedAiAuthoringJobs: many(aiAuthoringJobs, {
     relationName: 'aiAuthoringJobAcceptor',
   }),
+  createdTestAutomations: many(testAutomations, {
+    relationName: 'testAutomationCreator',
+  }),
+  acceptedTestAutomations: many(testAutomations, {
+    relationName: 'testAutomationAcceptor',
+  }),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -505,20 +581,24 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   environments: many(environments),
 }));
 
-export const environmentsRelations = relations(environments, ({ one }) => ({
-  project: one(projects, {
-    fields: [environments.projectId],
-    references: [projects.id],
+export const environmentsRelations = relations(
+  environments,
+  ({ one, many }) => ({
+    project: one(projects, {
+      fields: [environments.projectId],
+      references: [projects.id],
+    }),
+    product: one(products, {
+      fields: [environments.productId],
+      references: [products.id],
+    }),
+    createdBy: one(users, {
+      fields: [environments.createdById],
+      references: [users.id],
+    }),
+    testAutomations: many(testAutomations),
   }),
-  product: one(products, {
-    fields: [environments.productId],
-    references: [products.id],
-  }),
-  createdBy: one(users, {
-    fields: [environments.createdById],
-    references: [users.id],
-  }),
-}));
+);
 
 export const aiConnectionsRelations = relations(
   aiConnections,
@@ -604,6 +684,7 @@ export const testCasesRelations = relations(testCases, ({ one, many }) => ({
   }),
   versions: many(testCaseVersions),
   aiAuthoringJobs: many(aiAuthoringJobs),
+  automations: many(testAutomations),
 }));
 
 export const aiAuthoringJobsRelations = relations(
@@ -648,6 +729,35 @@ export const testCaseVersionsRelations = relations(
     runItems: many(testRunItems),
     results: many(testResults),
     files: many(files),
+    automations: many(testAutomations),
+  }),
+);
+
+export const testAutomationsRelations = relations(
+  testAutomations,
+  ({ one }) => ({
+    testCase: one(testCases, {
+      fields: [testAutomations.testCaseId],
+      references: [testCases.id],
+    }),
+    sourceTestCaseVersion: one(testCaseVersions, {
+      fields: [testAutomations.sourceTestCaseVersionId],
+      references: [testCaseVersions.id],
+    }),
+    environment: one(environments, {
+      fields: [testAutomations.environmentId],
+      references: [environments.id],
+    }),
+    createdBy: one(users, {
+      fields: [testAutomations.createdById],
+      references: [users.id],
+      relationName: 'testAutomationCreator',
+    }),
+    acceptedBy: one(users, {
+      fields: [testAutomations.acceptedById],
+      references: [users.id],
+      relationName: 'testAutomationAcceptor',
+    }),
   }),
 );
 
