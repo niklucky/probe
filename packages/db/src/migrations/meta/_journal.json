@@ -57,6 +57,13 @@
       "when": 1785196460620,
       "tag": "0007_brown_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785200095269,
+      "tag": "0008_lame_wither",
+      "breakpoints": true
     }
   ]
 }

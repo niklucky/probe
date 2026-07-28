@@ -1,0 +1,8 @@
+{
+  "name": "probe-playwright-execution",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}

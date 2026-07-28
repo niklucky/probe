@@ -52,6 +52,29 @@ const rawServerEnvSchema = z.object({
   MINIO_SECRET_KEY: z.string().min(1).default('signal_password'),
   MINIO_BUCKET: z.string().min(1).default('signal-assets'),
   MINIO_PUBLIC_URL: z.string().url().optional(),
+  RUNNER_VERSION: z.string().min(1).default('1'),
+  RUNNER_CONTAINER_IMAGE: z
+    .string()
+    .min(1)
+    .default('probe-playwright-runner:1'),
+  RUNNER_CPU_LIMIT: z.coerce.number().positive().max(8).default(1),
+  RUNNER_MEMORY_MB: z.coerce.number().int().min(128).max(8192).default(768),
+  RUNNER_PROCESS_LIMIT: z.coerce.number().int().min(32).max(1024).default(128),
+  RUNNER_ARTIFACT_LIMIT_MB: z.coerce
+    .number()
+    .int()
+    .min(16)
+    .max(2048)
+    .default(256),
+  RUNNER_NETWORK_POLICY: z
+    .string()
+    .min(1)
+    .refine(
+      (value) => !['host', 'bridge', 'default', 'none'].includes(value),
+      'must name a dedicated egress-controlled Docker network',
+    )
+    .default('probe-runner-egress'),
+  RUNNER_ARTIFACT_BUCKET: z.string().min(1).default('signal-runner-artifacts'),
   AI_MASTER_KEY: masterKeySchema,
   AI_APPROVED_LOCAL_HOSTS: z
     .string()

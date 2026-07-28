@@ -36,5 +36,8 @@ describe('server environment', () => {
     expect(() => parseServerEnv({ AI_MASTER_KEY: 'invalid' })).toThrow(
       'AI_MASTER_KEY',
     );
+    expect(() => parseServerEnv({ RUNNER_NETWORK_POLICY: 'host' })).toThrow(
+      'RUNNER_NETWORK_POLICY',
+    );
   });
 });

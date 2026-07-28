@@ -1,0 +1,89 @@
+# Isolated asynchronous automation runner
+
+Probe executes accepted Playwright TypeScript automations through a separate
+worker (`apps/runner`). The API only validates authorization and inserts a
+durable PostgreSQL job; it never imports or evaluates automation source.
+
+## Local setup
+
+1. Start PostgreSQL and MinIO with `docker compose -f compose.local.yml up -d`.
+2. Build the immutable execution image with `bun run runner:image:build`.
+3. Create a dedicated Docker network named `probe-runner-egress` and apply the
+   host firewall/egress policy described below.
+4. Start the API/web processes, then run the worker separately with
+   `bun run runner:dev`.
+
+The worker needs access to the Docker daemon. The API process must not receive
+that access.
+
+## Job lifecycle and recovery
+
+Jobs transition through `queued`, `claimed`, `running`, and exactly one of
+`passed`, `failed`, `timed_out`, `cancelled`, or `infrastructure_error`.
+Claiming uses a PostgreSQL transaction with `FOR UPDATE SKIP LOCKED`, so two
+workers cannot claim the same row. A worker heartbeats while Docker runs.
+Another worker moves an abandoned job back to `queued`; after `maxAttempts`, it
+finishes it as `infrastructure_error`. Queued and claimed cancellation is
+immediate, while running cancellation stops the disposable container.
+
+Execution settings persist with every job, including the exact automation id,
+environment id, runner version, image, timeout, CPU, memory, PID, video, and
+network-policy values.
+
+## Isolation and network policy
+
+The runner launches one disposable, unprivileged container per job with:
+
+- a read-only root filesystem and read-only source mount;
+- dropped Linux capabilities and `no-new-privileges`;
+- fixed CPU, memory/memory-swap, PID, tmpfs, and wall-clock limits;
+- no host filesystem mount other than one source file and one artifact folder;
+- a dedicated Docker network from `RUNNER_NETWORK_POLICY`.
+
+Production operators must make that Docker network an egress-controlled bridge.
+Its firewall rules should deny RFC1918, link-local, metadata
+(`169.254.169.254`), Docker host, and arbitrary internet access, and allow only
+the origins represented by approved project environments (normally through an
+allow-listing HTTP proxy). Do not use the default `bridge` or `host` network.
+Environment creation already rejects unsafe target URLs according to Probe's
+environment network policy; the Docker firewall remains the enforcement
+boundary for generated code.
+
+## Secrets and artifacts
+
+Runtime test secrets are supplied to the worker through
+`RUNNER_TEST_SECRETS_JSON` and forwarded to Docker by environment-variable
+_name_. A job receives only names explicitly referenced as `process.env.NAME`
+in its accepted source; unrelated configured secrets are not injected. Values
+are never persisted in source, job rows, or process arguments.
+Logs and errors are redacted. Trace, screenshot, and video capture is disabled
+for executions with runtime secrets because browser artifacts can contain DOM
+and input values.
+
+Artifacts are written to the private `signal-runner-artifacts` bucket. The API
+checks project membership before issuing a five-minute download URL; object
+names are never returned by list/get procedures. Artifact metadata expires
+after `RUNNER_ARTIFACT_RETENTION_DAYS` (14 days by default). Deployments should
+configure a matching MinIO lifecycle rule to delete objects under
+`automation-executions/` after that period.
+
+## Operational configuration
+
+API:
+
+- `RUNNER_VERSION`
+- `RUNNER_CONTAINER_IMAGE`
+- `RUNNER_CPU_LIMIT`
+- `RUNNER_MEMORY_MB`
+- `RUNNER_PROCESS_LIMIT`
+- `RUNNER_ARTIFACT_LIMIT_MB`
+- `RUNNER_NETWORK_POLICY`
+- `RUNNER_ARTIFACT_BUCKET`
+
+Worker:
+
+- `RUNNER_ID`, `RUNNER_POLL_MS`, `RUNNER_STALE_SECONDS`
+- `RUNNER_ARTIFACT_RETENTION_DAYS`
+- `RUNNER_TEST_SECRETS_JSON`
+- `DATABASE_URL` and MinIO connection variables; `MINIO_SECRET_KEY` is required
+  and has no default

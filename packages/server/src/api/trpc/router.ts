@@ -12,6 +12,7 @@ import { environmentsRouter } from './routers/environments';
 import { aiConnectionsRouter } from './routers/ai-connections';
 import { aiAuthoringRouter } from './routers/ai-authoring';
 import { testAutomationsRouter } from './routers/test-automations';
+import { automationExecutionsRouter } from './routers/automation-executions';
 
 export const appRouter = router({
   auth: authRouter,
@@ -27,6 +28,7 @@ export const appRouter = router({
   aiConnections: aiConnectionsRouter,
   aiAuthoring: aiAuthoringRouter,
   testAutomations: testAutomationsRouter,
+  automationExecutions: automationExecutionsRouter,
 });
 
 export type AppRouter = typeof appRouter;

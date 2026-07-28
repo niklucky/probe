@@ -29,6 +29,8 @@ import { createAiAuthoringRepository } from '../repositories/ai-authoring/reposi
 import { createAiAuthoringService } from '../services/ai-authoring/service';
 import { createTestAutomationRepository } from '../repositories/test-automations/repository';
 import { createTestAutomationService } from '../services/test-automations/service';
+import { createAutomationExecutionRepository } from '../repositories/automation-executions/repository';
+import { createAutomationExecutionService } from '../services/automation-executions/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -77,6 +79,21 @@ export function createServices() {
       authorization,
       aiConnections,
       environments,
+    ),
+    automationExecutions: createAutomationExecutionService(
+      createAutomationExecutionRepository(),
+      authorization,
+      storage,
+      serverEnv.RUNNER_ARTIFACT_BUCKET,
+      {
+        version: serverEnv.RUNNER_VERSION,
+        containerImage: serverEnv.RUNNER_CONTAINER_IMAGE,
+        cpuLimit: serverEnv.RUNNER_CPU_LIMIT,
+        memoryMb: serverEnv.RUNNER_MEMORY_MB,
+        processLimit: serverEnv.RUNNER_PROCESS_LIMIT,
+        artifactLimitMb: serverEnv.RUNNER_ARTIFACT_LIMIT_MB,
+        networkPolicy: serverEnv.RUNNER_NETWORK_POLICY,
+      },
     ),
     projects: createProjectService(createProjectRepository(), authorization),
     products: createProductService(createProductRepository(), authorization),

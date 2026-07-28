@@ -2,6 +2,10 @@
 
 A modern, user-friendly test management application for QA engineers and teams. Built with TypeScript, Bun, React, and PostgreSQL.
 
+Accepted Playwright automations can run asynchronously in the separate isolated
+worker. See [the runner guide](docs/automation-runner.md) for local setup,
+security boundaries, recovery behavior, and artifact retention.
+
 ## Features
 
 ### Current Implementation (MVP)

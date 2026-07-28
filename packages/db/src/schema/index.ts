@@ -86,6 +86,25 @@ export const automationStatusEnum = pgEnum('automation_status', [
   'discarded',
   'failed',
 ]);
+export const automationExecutionStatusEnum = pgEnum(
+  'automation_execution_status',
+  [
+    'queued',
+    'claimed',
+    'running',
+    'passed',
+    'failed',
+    'timed_out',
+    'cancelled',
+    'infrastructure_error',
+  ],
+);
+export const automationArtifactKindEnum = pgEnum('automation_artifact_kind', [
+  'trace',
+  'screenshot',
+  'video',
+  'log',
+]);
 
 // Users table
 export const users = pgTable('users', {
@@ -451,6 +470,99 @@ export const testAutomations = pgTable(
   }),
 );
 
+// PostgreSQL is the durable queue for runner work. Source and secrets are not
+// copied here: a worker loads the immutable accepted automation by id and
+// receives secrets only through its process environment.
+export const automationExecutionJobs = pgTable(
+  'automation_execution_jobs',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => projects.id, { onDelete: 'cascade' })
+      .notNull(),
+    automationId: integer('automation_id')
+      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .notNull(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'restrict' })
+      .notNull(),
+    status: automationExecutionStatusEnum('status').notNull().default('queued'),
+    requestedById: integer('requested_by_id')
+      .references(() => users.id)
+      .notNull(),
+    workerId: varchar('worker_id', { length: 255 }),
+    attempt: integer('attempt').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(2),
+    timeoutSeconds: integer('timeout_seconds').notNull().default(300),
+    settings: jsonb('settings')
+      .$type<{
+        browser: 'chromium';
+        captureVideo: boolean;
+        runnerVersion: string;
+        containerImage: string;
+        cpuLimit: number;
+        memoryMb: number;
+        processLimit: number;
+        artifactLimitMb: number;
+        networkPolicy: string;
+      }>()
+      .notNull(),
+    resultSummary: jsonb('result_summary').$type<{
+      tests: number;
+      passed: number;
+      failed: number;
+      durationMs: number;
+    }>(),
+    errorCode: varchar('error_code', { length: 100 }),
+    errorMessage: varchar('error_message', { length: 1000 }),
+    structuredLogs: jsonb('structured_logs')
+      .$type<Array<{ at: string; level: string; message: string }>>()
+      .notNull()
+      .default([]),
+    cancellationRequestedAt: timestamp('cancellation_requested_at'),
+    claimedAt: timestamp('claimed_at'),
+    startedAt: timestamp('started_at'),
+    heartbeatAt: timestamp('heartbeat_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    queueIndex: index('automation_execution_jobs_queue_index').on(
+      table.status,
+      table.createdAt,
+    ),
+    projectIndex: index('automation_execution_jobs_project_index').on(
+      table.projectId,
+      table.createdAt,
+    ),
+    automationIndex: index('automation_execution_jobs_automation_index').on(
+      table.automationId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const automationExecutionArtifacts = pgTable(
+  'automation_execution_artifacts',
+  {
+    id: serial('id').primaryKey(),
+    jobId: integer('job_id')
+      .references(() => automationExecutionJobs.id, { onDelete: 'cascade' })
+      .notNull(),
+    kind: automationArtifactKindEnum('kind').notNull(),
+    objectName: varchar('object_name', { length: 1000 }).notNull(),
+    originalName: varchar('original_name', { length: 500 }).notNull(),
+    mimeType: varchar('mime_type', { length: 100 }).notNull(),
+    size: integer('size').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    jobIndex: index('automation_execution_artifacts_job_index').on(table.jobId),
+  }),
+);
+
 // Test runs
 export const testRuns = pgTable('test_runs', {
   id: serial('id').primaryKey(),
@@ -560,6 +672,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   acceptedTestAutomations: many(testAutomations, {
     relationName: 'testAutomationAcceptor',
   }),
+  requestedAutomationExecutions: many(automationExecutionJobs),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -570,6 +683,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   products: many(products),
   teams: many(teams),
   environments: many(environments),
+  automationExecutionJobs: many(automationExecutionJobs),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
@@ -597,6 +711,7 @@ export const environmentsRelations = relations(
       references: [users.id],
     }),
     testAutomations: many(testAutomations),
+    automationExecutionJobs: many(automationExecutionJobs),
   }),
 );
 
@@ -735,7 +850,7 @@ export const testCaseVersionsRelations = relations(
 
 export const testAutomationsRelations = relations(
   testAutomations,
-  ({ one }) => ({
+  ({ one, many }) => ({
     testCase: one(testCases, {
       fields: [testAutomations.testCaseId],
       references: [testCases.id],
@@ -757,6 +872,40 @@ export const testAutomationsRelations = relations(
       fields: [testAutomations.acceptedById],
       references: [users.id],
       relationName: 'testAutomationAcceptor',
+    }),
+    executionJobs: many(automationExecutionJobs),
+  }),
+);
+
+export const automationExecutionJobsRelations = relations(
+  automationExecutionJobs,
+  ({ one, many }) => ({
+    project: one(projects, {
+      fields: [automationExecutionJobs.projectId],
+      references: [projects.id],
+    }),
+    automation: one(testAutomations, {
+      fields: [automationExecutionJobs.automationId],
+      references: [testAutomations.id],
+    }),
+    environment: one(environments, {
+      fields: [automationExecutionJobs.environmentId],
+      references: [environments.id],
+    }),
+    requestedBy: one(users, {
+      fields: [automationExecutionJobs.requestedById],
+      references: [users.id],
+    }),
+    artifacts: many(automationExecutionArtifacts),
+  }),
+);
+
+export const automationExecutionArtifactsRelations = relations(
+  automationExecutionArtifacts,
+  ({ one }) => ({
+    job: one(automationExecutionJobs, {
+      fields: [automationExecutionArtifacts.jobId],
+      references: [automationExecutionJobs.id],
     }),
   }),
 );

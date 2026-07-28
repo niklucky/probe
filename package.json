@@ -9,7 +9,9 @@
     "db:generate": "turbo db:generate",
     "db:migrate": "turbo db:migrate",
     "db:push": "turbo db:push",
-    "db:studio": "turbo db:studio"
+    "db:studio": "turbo db:studio",
+    "runner:dev": "bun --cwd apps/runner run dev",
+    "runner:image:build": "docker build -t probe-playwright-runner:1 apps/runner/execution-image"
   },
   "devDependencies": {
     "@types/bcryptjs": "2.4.6",

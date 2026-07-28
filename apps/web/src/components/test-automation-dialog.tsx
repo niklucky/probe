@@ -13,7 +13,16 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertCircle, Check, Code2, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  Code2,
+  Download,
+  Play,
+  RefreshCw,
+  StopCircle,
+  Trash2,
+} from 'lucide-react';
 
 interface TestAutomationDialogProps {
   open: boolean;
@@ -41,6 +50,9 @@ export function TestAutomationDialog({
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
+  const [executionAutomationId, setExecutionAutomationId] = useState<
+    number | null
+  >(null);
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
@@ -70,6 +82,7 @@ export function TestAutomationDialog({
       setProposalId(null);
       setSource('');
       setError('');
+      setExecutionAutomationId(null);
     }
   }, [open]);
 
@@ -250,6 +263,12 @@ export function TestAutomationDialog({
                     if (automation.status === 'generated') {
                       setProposalId(automation.id);
                       setSource(automation.source);
+                    } else if (automation.status === 'accepted') {
+                      setExecutionAutomationId(
+                        executionAutomationId === automation.id
+                          ? null
+                          : automation.id,
+                      );
                     }
                   }}
                 >
@@ -282,6 +301,11 @@ export function TestAutomationDialog({
                 No automation has been generated for this test case.
               </p>
             )}
+            {executionAutomationId && (
+              <AutomationExecutionHistory
+                automationId={executionAutomationId}
+              />
+            )}
           </div>
         </div>
         <DialogFooter>
@@ -291,5 +315,165 @@ export function TestAutomationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const terminalStatuses = new Set([
+  'passed',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'infrastructure_error',
+]);
+
+function AutomationExecutionHistory({
+  automationId,
+}: {
+  automationId: number;
+}) {
+  const [error, setError] = useState('');
+  const [captureVideo, setCaptureVideo] = useState(false);
+  const utils = trpc.useContext();
+  const { data: jobs = [] } = trpc.automationExecutions.list.useQuery(
+    { automationId },
+    { refetchInterval: 2000 },
+  );
+  const queue = trpc.automationExecutions.queue.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.automationExecutions.list.invalidate({ automationId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const cancel = trpc.automationExecutions.cancel.useMutation({
+    onSuccess: () =>
+      utils.automationExecutions.list.invalidate({ automationId }),
+    onError: (requestError) => setError(requestError.message),
+  });
+  const artifactUrl = trpc.automationExecutions.artifactUrl.useMutation({
+    onSuccess: ({ url }) => window.open(url, '_blank', 'noopener,noreferrer'),
+    onError: (requestError) => setError(requestError.message),
+  });
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-medium">Execution history</h4>
+          <p className="text-xs text-muted-foreground">
+            Runs continue asynchronously if this dialog is closed.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureVideo}
+              onChange={(event) => setCaptureVideo(event.target.checked)}
+            />
+            Video on failure
+          </label>
+          <Button
+            size="sm"
+            disabled={queue.isPending}
+            onClick={() =>
+              queue.mutate({
+                automationId,
+                timeoutSeconds: 300,
+                captureVideo,
+              })
+            }
+          >
+            <Play className="mr-2 h-4 w-4" />
+            {queue.isPending ? 'Queuing…' : 'Run accepted version'}
+          </Button>
+        </div>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {jobs.length ? (
+        jobs.map((job) => (
+          <div key={job.id} className="rounded-md border bg-background p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Run #{job.id}</span>
+                  <Badge
+                    variant={
+                      job.status === 'passed'
+                        ? 'default'
+                        : [
+                              'failed',
+                              'timed_out',
+                              'infrastructure_error',
+                            ].includes(job.status)
+                          ? 'destructive'
+                          : 'outline'
+                    }
+                  >
+                    {job.status.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Attempt {job.attempt}/{job.maxAttempts} · timeout{' '}
+                  {job.timeoutSeconds}s
+                  {job.resultSummary
+                    ? ` · ${job.resultSummary.durationMs}ms`
+                    : ''}
+                </p>
+              </div>
+              {!terminalStatuses.has(job.status) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={cancel.isPending}
+                  onClick={() => cancel.mutate({ id: job.id })}
+                >
+                  <StopCircle className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              )}
+            </div>
+            {job.errorMessage && (
+              <p className="mt-2 text-xs text-destructive">
+                {job.errorMessage}
+              </p>
+            )}
+            {job.structuredLogs.length > 0 && (
+              <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">
+                {job.structuredLogs
+                  .slice(-20)
+                  .map((entry) => entry.message)
+                  .join('\n')}
+              </pre>
+            )}
+            {job.artifacts && job.artifacts.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {job.artifacts.map((artifact) => (
+                  <Button
+                    key={artifact.id}
+                    size="sm"
+                    variant="outline"
+                    disabled={artifactUrl.isPending}
+                    onClick={() =>
+                      artifactUrl.mutate({
+                        jobId: job.id,
+                        artifactId: artifact.id,
+                      })
+                    }
+                  >
+                    <Download className="mr-2 h-3 w-3" />
+                    {artifact.kind}: {artifact.originalName}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This accepted automation has not been run yet.
+        </p>
+      )}
+    </div>
   );
 }

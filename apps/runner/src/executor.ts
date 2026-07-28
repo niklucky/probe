@@ -1,0 +1,361 @@
+import { spawn } from 'node:child_process';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+
+export interface ExecutionPayload {
+  id: number;
+  timeoutSeconds: number;
+  settings: {
+    captureVideo: boolean;
+    containerImage: string;
+    cpuLimit: number;
+    memoryMb: number;
+    processLimit: number;
+    artifactLimitMb: number;
+    networkPolicy: string;
+  };
+  automation: { source: string };
+  environment: { baseUrl: string };
+}
+
+export interface ExecutionResult {
+  status:
+    'passed' | 'failed' | 'timed_out' | 'cancelled' | 'infrastructure_error';
+  summary: {
+    tests: number;
+    passed: number;
+    failed: number;
+    durationMs: number;
+  };
+  errorCode?: string;
+  errorMessage?: string;
+  logs: Array<{ at: string; level: string; message: string }>;
+  artifactDirectory: string;
+  cleanup: () => Promise<void>;
+}
+
+const MAX_LOG_BYTES = 512_000;
+
+export function selectRuntimeSecrets(
+  source: string,
+  available: Record<string, string>,
+) {
+  const names = new Set<string>();
+  for (const match of source.matchAll(
+    /process\.env(?:\.([A-Z_][A-Z0-9_]*)|\[['"]([A-Z_][A-Z0-9_]*)['"]\])/g,
+  )) {
+    const name = match[1] ?? match[2];
+    if (name && available[name] !== undefined) names.add(name);
+  }
+  return Object.fromEntries(
+    [...names].sort().map((name) => [name, available[name]!]),
+  );
+}
+
+export function redactSecrets(value: string, secrets: Record<string, string>) {
+  let sanitized = value;
+  for (const secret of Object.values(secrets).sort(
+    (left, right) => right.length - left.length,
+  )) {
+    if (secret.length >= 3)
+      sanitized = sanitized.split(secret).join('[REDACTED]');
+  }
+  return sanitized
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi, 'Bearer [REDACTED]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, '[REDACTED]');
+}
+
+export function buildDockerArgs(
+  payload: ExecutionPayload,
+  sourcePath: string,
+  artifactDirectory: string,
+  secrets: Record<string, string>,
+) {
+  if (
+    ['host', 'bridge', 'default', 'none'].includes(
+      payload.settings.networkPolicy,
+    )
+  ) {
+    throw new Error(
+      'Execution requires a dedicated egress-controlled Docker network',
+    );
+  }
+  const containerName = `probe-execution-${payload.id}`;
+  const args = [
+    'run',
+    '--rm',
+    '--name',
+    containerName,
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt=no-new-privileges',
+    `--cpus=${payload.settings.cpuLimit}`,
+    `--memory=${payload.settings.memoryMb}m`,
+    `--memory-swap=${payload.settings.memoryMb}m`,
+    '--shm-size=256m',
+    `--pids-limit=${payload.settings.processLimit}`,
+    `--ulimit=fsize=${payload.settings.artifactLimitMb * 1024}`,
+    `--network=${payload.settings.networkPolicy}`,
+    '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=256m',
+    `--mount=type=bind,src=${resolve(sourcePath)},dst=/workspace/tests/automation.spec.ts,readonly`,
+    `--mount=type=bind,src=${resolve(artifactDirectory)},dst=/artifacts`,
+    '--env',
+    `BASE_URL=${approvedTarget(payload.environment.baseUrl)}`,
+    '--env',
+    `CAPTURE_VIDEO=${payload.settings.captureVideo ? 'on' : 'off'}`,
+    '--env',
+    `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
+    '--env',
+    `HAS_TEST_SECRETS=${Object.keys(secrets).length ? 'true' : 'false'}`,
+  ];
+  for (const name of Object.keys(secrets).sort()) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
+      throw new Error(`Invalid test secret environment variable: ${name}`);
+    }
+    // Docker reads the value from the runner environment. It never appears in
+    // process arguments, source, queue records, or result data.
+    args.push('--env', name);
+  }
+  args.push(payload.settings.containerImage);
+  return { containerName, args };
+}
+
+function approvedTarget(value: string) {
+  const target = new URL(value);
+  if (
+    !['http:', 'https:'].includes(target.protocol) ||
+    target.username ||
+    target.password
+  ) {
+    throw new Error('Execution environment target is not an approved HTTP URL');
+  }
+  return target.toString();
+}
+
+function runCommand(command: string, args: string[]) {
+  return new Promise<number>((resolveExit, reject) => {
+    const child = spawn(command, args, { stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('exit', (code) => resolveExit(code ?? 1));
+  });
+}
+
+export async function executeInContainer(
+  payload: ExecutionPayload,
+  secrets: Record<string, string>,
+  hooks: {
+    heartbeat: () => Promise<boolean>;
+  },
+): Promise<ExecutionResult> {
+  const directory = await mkdtemp(join(tmpdir(), `probe-run-${payload.id}-`));
+  const artifactDirectory = join(directory, 'artifacts');
+  await mkdir(artifactDirectory);
+  await chmod(directory, 0o755);
+  await chmod(artifactDirectory, 0o777);
+  await writeFile(join(artifactDirectory, '.keep'), '');
+  const sourcePath = join(directory, 'automation.spec.ts');
+  await writeFile(sourcePath, payload.automation.source, { mode: 0o400 });
+  const { containerName, args } = buildDockerArgs(
+    payload,
+    sourcePath,
+    artifactDirectory,
+    secrets,
+  );
+
+  const startedAt = Date.now();
+  let output = '';
+  let timedOut = false;
+  let cancelled = false;
+  let artifactLimitExceeded = false;
+  let infrastructureError: Error | undefined;
+  let child: ReturnType<typeof spawn> | undefined;
+  const stop = async () => {
+    if (!child || child.exitCode !== null) return;
+    await runCommand('docker', ['stop', '--time=2', containerName]).catch(
+      () => undefined,
+    );
+  };
+
+  try {
+    child = spawn('docker', args, {
+      env: { ...process.env, ...secrets },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const append = (chunk: Buffer) => {
+      const remaining = MAX_LOG_BYTES - Buffer.byteLength(output);
+      if (remaining <= 0) return;
+      output += chunk.toString('utf8').slice(0, remaining);
+    };
+    child.stdout?.on('data', append);
+    child.stderr?.on('data', append);
+    child.once('error', (error) => {
+      infrastructureError = error;
+    });
+
+    const monitor = setInterval(async () => {
+      if (timedOut || cancelled || artifactLimitExceeded) return;
+      if (Date.now() - startedAt >= payload.timeoutSeconds * 1000) {
+        timedOut = true;
+        await stop();
+        return;
+      }
+      if (
+        (await directorySize(artifactDirectory)) >
+        payload.settings.artifactLimitMb * 1024 * 1024
+      ) {
+        artifactLimitExceeded = true;
+        await stop();
+        return;
+      }
+      if (await hooks.heartbeat()) {
+        cancelled = true;
+        await stop();
+      }
+    }, 2000);
+    const exitCode = await new Promise<number>((resolveExit) => {
+      let settled = false;
+      const settle = (code: number) => {
+        if (settled) return;
+        settled = true;
+        resolveExit(code);
+      };
+      child?.once('exit', (code) => settle(code ?? 1));
+      child?.once('error', () => settle(127));
+    });
+    clearInterval(monitor);
+
+    const sanitized = redactSecrets(output, secrets);
+    const durationMs = Date.now() - startedAt;
+    const containerFailure =
+      Boolean(infrastructureError) || [125, 126, 127].includes(exitCode);
+    const status = containerFailure
+      ? 'infrastructure_error'
+      : artifactLimitExceeded
+        ? 'infrastructure_error'
+        : cancelled
+          ? 'cancelled'
+          : timedOut
+            ? 'timed_out'
+            : exitCode === 0
+              ? 'passed'
+              : 'failed';
+    const errorCode =
+      status === 'infrastructure_error'
+        ? artifactLimitExceeded
+          ? 'ARTIFACT_LIMIT_EXCEEDED'
+          : 'CONTAINER_START_FAILED'
+        : status === 'timed_out'
+          ? 'EXECUTION_TIMEOUT'
+          : status === 'cancelled'
+            ? 'EXECUTION_CANCELLED'
+            : status === 'failed'
+              ? 'PLAYWRIGHT_FAILED'
+              : undefined;
+    return {
+      status,
+      summary: {
+        tests: 1,
+        passed: status === 'passed' ? 1 : 0,
+        failed: status === 'failed' ? 1 : 0,
+        durationMs,
+      },
+      errorCode,
+      errorMessage:
+        status === 'passed'
+          ? undefined
+          : artifactLimitExceeded
+            ? `Artifact output exceeded ${payload.settings.artifactLimitMb} MB`
+            : sanitized.slice(-1000) ||
+              (infrastructureError
+                ? redactSecrets(infrastructureError.message, secrets)
+                : undefined),
+      logs: sanitized
+        .split('\n')
+        .filter(Boolean)
+        .slice(-200)
+        .map((message) => ({
+          at: new Date().toISOString(),
+          level: 'info',
+          message,
+        })),
+      artifactDirectory,
+      cleanup: () => rm(directory, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    await stop();
+    const message = redactSecrets(
+      error instanceof Error ? error.message : 'Runner infrastructure error',
+      secrets,
+    );
+    return {
+      status: 'infrastructure_error',
+      summary: {
+        tests: 0,
+        passed: 0,
+        failed: 0,
+        durationMs: Date.now() - startedAt,
+      },
+      errorCode: 'RUNNER_INFRASTRUCTURE_ERROR',
+      errorMessage: message,
+      logs: [{ at: new Date().toISOString(), level: 'error', message }],
+      artifactDirectory,
+      cleanup: () => rm(directory, { recursive: true, force: true }),
+    };
+  }
+}
+
+export async function listArtifactFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return listArtifactFiles(path);
+      return entry.isFile() ? [path] : [];
+    }),
+  );
+  return nested.flat();
+}
+
+async function directorySize(directory: string): Promise<number> {
+  let size = 0;
+  for (const path of await listArtifactFiles(directory)) {
+    try {
+      size += (await stat(path)).size;
+    } catch (error) {
+      if (!(
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      )) {
+        throw error;
+      }
+    }
+  }
+  return size;
+}
+
+export function artifactMetadata(path: string) {
+  const name = basename(path);
+  if (name === '.keep') return undefined;
+  if (name.endsWith('.zip')) {
+    return { kind: 'trace' as const, mimeType: 'application/zip' };
+  }
+  if (name.endsWith('.webm')) {
+    return { kind: 'video' as const, mimeType: 'video/webm' };
+  }
+  if (name.endsWith('.png')) {
+    return { kind: 'screenshot' as const, mimeType: 'image/png' };
+  }
+  return { kind: 'log' as const, mimeType: 'text/plain' };
+}
+
+export { stat };
