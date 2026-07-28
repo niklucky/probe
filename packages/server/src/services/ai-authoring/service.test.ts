@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AppError } from '@probe/shared/errors/app-error';
 import { createAiAuthoringService, sanitizeAuthoringText } from './service';
+import { testSpecJsonSchema } from './prompts';
 
 const validSpec = {
   title: 'Reset password',
@@ -60,6 +61,13 @@ function job(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AI test-case authoring', () => {
+  test('declares every step property as required for strict JSON schema providers', () => {
+    expect(testSpecJsonSchema.properties.steps.items.required).toEqual([
+      'action',
+      'expectedResult',
+    ]);
+  });
+
   test('validates and repairs structured output at most once', async () => {
     const outputs = [{ title: '' }, validSpec];
     const calls: unknown[] = [];
@@ -102,6 +110,12 @@ describe('AI test-case authoring', () => {
     );
 
     expect(calls).toHaveLength(2);
+    expect(
+      calls.every(
+        (request) =>
+          !Object.prototype.hasOwnProperty.call(request, 'temperature'),
+      ),
+    ).toBe(true);
     expect(result.proposal).toEqual(validSpec);
     expect(completed).toHaveLength(1);
   });

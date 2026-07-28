@@ -98,6 +98,7 @@ function automation(overrides: Record<string, unknown> = {}) {
 describe('Playwright automation generation', () => {
   test('links generation to the exact accepted version and environment', async () => {
     const writes: Array<Record<string, unknown>> = [];
+    const requests: Array<Record<string, unknown>> = [];
     const repository = {
       async findTestCase() {
         return testCase;
@@ -128,7 +129,8 @@ describe('Playwright automation generation', () => {
           return {
             connectionRef: 'env:local',
             adapter: {
-              async generateStructured() {
+              async generateStructured(request: Record<string, unknown>) {
+                requests.push(request);
                 return {
                   value: { source: generatedSource },
                   provider: 'openai-compatible',
@@ -170,6 +172,7 @@ describe('Playwright automation generation', () => {
     });
     expect(result.stale).toBe(false);
     expect(result.source).toContain('getByRole');
+    expect(requests[0]).not.toHaveProperty('temperature');
   });
 
   test('marks automation stale when the current manual version changes', async () => {
