@@ -50,7 +50,7 @@ export function TestAutomationDialog({
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
-  const [executionAutomationId, setExecutionAutomationId] = useState<
+  const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
   >(null);
 
@@ -82,7 +82,7 @@ export function TestAutomationDialog({
       setProposalId(null);
       setSource('');
       setError('');
-      setExecutionAutomationId(null);
+      setSelectedAutomationId(null);
     }
   }, [open]);
 
@@ -90,15 +90,17 @@ export function TestAutomationDialog({
     onSuccess: (automation) => {
       setProposalId(automation.id);
       setSource(automation.source);
+      setSelectedAutomationId(automation.id);
       setError('');
       utils.testAutomations.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
   });
   const accept = trpc.testAutomations.accept.useMutation({
-    onSuccess: () => {
+    onSuccess: (automation) => {
       setProposalId(null);
       setSource('');
+      setSelectedAutomationId(automation.id);
       setError('');
       utils.testAutomations.list.invalidate({ testCaseId });
     },
@@ -120,6 +122,9 @@ export function TestAutomationDialog({
       : Number(connectionId)
     : undefined;
   const busy = generate.isPending || accept.isPending || discard.isPending;
+  const selectedAutomation = automations.find(
+    (automation) => automation.id === selectedAutomationId,
+  );
 
   const requestGeneration = () => {
     setError('');
@@ -258,17 +263,17 @@ export function TestAutomationDialog({
                 <button
                   type="button"
                   key={automation.id}
-                  className="flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50"
+                  aria-pressed={selectedAutomationId === automation.id}
+                  className={`flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50 ${
+                    selectedAutomationId === automation.id
+                      ? 'border-primary bg-muted/50'
+                      : ''
+                  }`}
                   onClick={() => {
+                    setSelectedAutomationId(automation.id);
                     if (automation.status === 'generated') {
                       setProposalId(automation.id);
                       setSource(automation.source);
-                    } else if (automation.status === 'accepted') {
-                      setExecutionAutomationId(
-                        executionAutomationId === automation.id
-                          ? null
-                          : automation.id,
-                      );
                     }
                   }}
                 >
@@ -301,9 +306,29 @@ export function TestAutomationDialog({
                 No automation has been generated for this test case.
               </p>
             )}
-            {executionAutomationId && (
+            {selectedAutomation &&
+              selectedAutomation.status !== 'generated' && (
+                <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label
+                      htmlFor={`automation-source-${selectedAutomation.id}`}
+                    >
+                      Automation v{selectedAutomation.versionNumber} source
+                    </Label>
+                    <Badge variant="outline">Read only</Badge>
+                  </div>
+                  <Textarea
+                    id={`automation-source-${selectedAutomation.id}`}
+                    className="min-h-[360px] bg-background font-mono text-xs"
+                    value={selectedAutomation.source}
+                    readOnly
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+            {selectedAutomation?.status === 'accepted' && (
               <AutomationExecutionHistory
-                automationId={executionAutomationId}
+                automationId={selectedAutomation.id}
               />
             )}
           </div>
