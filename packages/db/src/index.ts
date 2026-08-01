@@ -12,4 +12,6 @@ export {
   like,
   sql,
   isNull,
+  lt,
+  lte,
 } from 'drizzle-orm';

@@ -6,6 +6,8 @@ import {
   db,
   eq,
   inArray,
+  lt,
+  lte,
   sql,
 } from '@probe/db';
 
@@ -168,7 +170,7 @@ export function createRunnerRepository(database: Database = db) {
     },
     expiredArtifacts(now: Date) {
       return database.query.automationExecutionArtifacts.findMany({
-        where: sql`${automationExecutionArtifacts.expiresAt} <= ${now}`,
+        where: lte(automationExecutionArtifacts.expiresAt, now),
         limit: 100,
       });
     },
@@ -181,7 +183,7 @@ export function createRunnerRepository(database: Database = db) {
       const stale = await database.query.automationExecutionJobs.findMany({
         where: and(
           inArray(automationExecutionJobs.status, ['claimed', 'running']),
-          sql`${automationExecutionJobs.heartbeatAt} < ${before}`,
+          lt(automationExecutionJobs.heartbeatAt, before),
         ),
       });
       for (const job of stale) {

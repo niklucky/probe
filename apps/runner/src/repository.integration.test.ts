@@ -129,7 +129,34 @@ integrationTest(
         repository.claim(`worker-b-${suffix}`),
       ]);
       expect(claims.filter(Boolean)).toHaveLength(1);
-      expect(claims.filter(Boolean)[0]?.status).toBe('claimed');
+      const claimed = claims.filter(Boolean)[0]!;
+      expect(claimed.status).toBe('claimed');
+
+      const staleHeartbeat = new Date(Date.now() - 120_000);
+      await db
+        .update(automationExecutionJobs)
+        .set({ status: 'running', heartbeatAt: staleHeartbeat })
+        .where(eq(automationExecutionJobs.id, claimed.id));
+      expect(await repository.recoverStale(new Date())).toBe(1);
+
+      const recovered = await db.query.automationExecutionJobs.findFirst({
+        where: eq(automationExecutionJobs.id, claimed.id),
+      });
+      expect(recovered?.status).toBe('queued');
+
+      const [artifact] = await repository.createArtifacts([
+        {
+          jobId: claimed.id,
+          kind: 'log',
+          objectName: `integration-test/${suffix}.log`,
+          originalName: 'runner.log',
+          mimeType: 'text/plain',
+          size: 1,
+          expiresAt: new Date(Date.now() - 60_000),
+        },
+      ]);
+      const expired = await repository.expiredArtifacts(new Date());
+      expect(expired.some(({ id }) => id === artifact!.id)).toBe(true);
     } finally {
       await db
         .delete(automationExecutionJobs)
