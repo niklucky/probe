@@ -493,9 +493,9 @@ function AutomationExecutionHistory({
                 ))}
               </div>
             )}
-            {['failed', 'timed_out', 'infrastructure_error'].includes(
-              job.status,
-            ) && <AutomationRepairPanel executionId={job.id} />}
+            {['failed', 'timed_out'].includes(job.status) && (
+              <AutomationRepairPanel executionId={job.id} />
+            )}
           </div>
         ))
       ) : (

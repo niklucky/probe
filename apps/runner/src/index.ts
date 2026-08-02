@@ -9,7 +9,10 @@ import {
   selectRuntimeSecrets,
   stat,
 } from './executor';
-import { createRunnerRepository } from './repository';
+import {
+  createRunnerRepository,
+  isRunnableExecutionSnapshot,
+} from './repository';
 
 const repository = createRunnerRepository();
 const storage = new Client({
@@ -64,14 +67,12 @@ async function runClaimedJob(jobId: number) {
     });
     return;
   }
-  if (
-    payload.automation.status !== 'accepted' ||
-    payload.automation.environmentId !== payload.environmentId
-  ) {
+  if (!isRunnableExecutionSnapshot(payload)) {
     await repository.finish(jobId, runnerConfig.RUNNER_ID, {
       status: 'infrastructure_error',
       errorCode: 'INVALID_EXECUTION_SNAPSHOT',
-      errorMessage: 'Accepted automation or environment no longer matches',
+      errorMessage:
+        'Automation is neither accepted nor an active repair candidate, or its environment no longer matches',
       structuredLogs: [],
     });
     return;

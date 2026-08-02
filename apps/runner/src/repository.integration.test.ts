@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import {
   automationExecutionJobs,
+  automationRepairAttempts,
+  automationRepairSessions,
   db,
   eq,
   environments,
@@ -13,7 +15,10 @@ import {
   testSuiteVersions,
   users,
 } from '@probe/db';
-import { createRunnerRepository } from './repository';
+import {
+  createRunnerRepository,
+  isRunnableExecutionSnapshot,
+} from './repository';
 
 const integrationTest = process.env.RUNNER_INTEGRATION_DATABASE_URL
   ? test
@@ -24,6 +29,7 @@ integrationTest(
   async () => {
     const suffix = crypto.randomUUID();
     let automationId: number | undefined;
+    let candidateAutomationId: number | undefined;
     const [user] = await db
       .insert(users)
       .values({
@@ -132,6 +138,76 @@ integrationTest(
       const claimed = claims.filter(Boolean)[0]!;
       expect(claimed.status).toBe('claimed');
 
+      const [candidate] = await db
+        .insert(testAutomations)
+        .values({
+          testCaseId: testCase!.id,
+          sourceTestCaseVersionId: caseVersion!.id,
+          environmentId: environment!.id,
+          versionNumber: 2,
+          status: 'generated',
+          source: "import { test } from '@playwright/test';",
+          promptVersion: 'repair-integration-test',
+          createdById: user!.id,
+        })
+        .returning();
+      candidateAutomationId = candidate!.id;
+      const [repairJob] = await db
+        .insert(automationExecutionJobs)
+        .values({
+          projectId: project!.id,
+          automationId: candidate!.id,
+          environmentId: environment!.id,
+          requestedById: user!.id,
+          settings: {
+            browser: 'chromium',
+            captureVideo: false,
+            runnerVersion: 'integration-test',
+            containerImage: 'integration-test',
+            cpuLimit: 1,
+            memoryMb: 128,
+            processLimit: 32,
+            artifactLimitMb: 16,
+            networkPolicy: 'integration-test',
+          },
+        })
+        .returning();
+      const [repairSession] = await db
+        .insert(automationRepairSessions)
+        .values({
+          projectId: project!.id,
+          sourceExecutionId: claimed.id,
+          sourceAutomationId: automation!.id,
+          requestedById: user!.id,
+          mode: 'review',
+          classification: 'automation',
+          diagnosis: 'Integration test',
+          status: 'running',
+          maxAttempts: 1,
+          maxTotalTokens: 1_000,
+          maxDurationMs: 60_000,
+          promptVersion: 'repair-integration-test',
+        })
+        .returning();
+      await db.insert(automationRepairAttempts).values({
+        sessionId: repairSession!.id,
+        attemptNumber: 1,
+        candidateAutomationId: candidate!.id,
+        executionJobId: repairJob!.id,
+        status: 'running',
+        explanation: 'Integration test',
+        sourceDiff: 'integration test',
+        changeFingerprint: 'a'.repeat(64),
+        evidenceSnapshot: {},
+        provider: 'openai',
+        model: 'integration-test',
+        promptVersion: 'repair-integration-test',
+        latencyMs: 1,
+      });
+      const repairPayload = await repository.getPayload(repairJob!.id);
+      expect(repairPayload).toBeDefined();
+      expect(isRunnableExecutionSnapshot(repairPayload!)).toBe(true);
+
       const staleHeartbeat = new Date(Date.now() - 120_000);
       await db
         .update(automationExecutionJobs)
@@ -169,12 +245,20 @@ integrationTest(
       expect(expired.some(({ id }) => id === artifact!.id)).toBe(true);
     } finally {
       await db
+        .delete(automationRepairSessions)
+        .where(eq(automationRepairSessions.projectId, project!.id));
+      await db
         .delete(automationExecutionJobs)
         .where(eq(automationExecutionJobs.projectId, project!.id));
       if (automationId) {
         await db
           .delete(testAutomations)
           .where(eq(testAutomations.id, automationId));
+      }
+      if (candidateAutomationId) {
+        await db
+          .delete(testAutomations)
+          .where(eq(testAutomations.id, candidateAutomationId));
       }
       await db.delete(projects).where(eq(projects.id, project!.id));
       await db.delete(users).where(eq(users.id, user!.id));

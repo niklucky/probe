@@ -85,6 +85,29 @@ function bindRepository(database: Database) {
         .returning();
       return session;
     },
+    async stopExpiredGeneration(now: Date) {
+      return database
+        .update(automationRepairSessions)
+        .set({
+          status: 'stopped',
+          stopReason:
+            'Generation did not finish before the session time budget',
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(automationRepairSessions.status, 'running'),
+            sql`${automationRepairSessions.createdAt} + (${automationRepairSessions.maxDurationMs} * interval '1 millisecond') <= ${now}`,
+            sql`not exists (
+              select 1 from ${automationRepairAttempts}
+              where ${automationRepairAttempts.sessionId} = ${automationRepairSessions.id}
+                and ${automationRepairAttempts.status} = 'running'
+            )`,
+          ),
+        )
+        .returning({ id: automationRepairSessions.id });
+    },
     async createAttempt(
       sessionId: number,
       candidate: Omit<typeof testAutomations.$inferInsert, 'versionNumber'>,

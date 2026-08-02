@@ -216,6 +216,25 @@ function fingerprint(source: string) {
   return createHash('sha256').update(source).digest('hex');
 }
 
+class RepairDeadlineError extends Error {}
+
+async function withinDeadline<T>(task: Promise<T>, remainingMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new RepairDeadlineError('Repair time budget exhausted')),
+          Math.max(1, remainingMs),
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function createAutomationRepairService(
   repository: AutomationRepairRepository,
   authorization: AuthorizationService,
@@ -223,6 +242,9 @@ export function createAutomationRepairService(
   runner: RunnerDefaults,
 ) {
   async function syncSession(id: number) {
+    // Runner completion and repair orchestration are separate processes. Reads
+    // reconcile the durable runner result so review-mode sessions become
+    // current even when the background coordinator handles automatic mode.
     const session = await repository.findSession(id);
     if (!session) return undefined;
     const latest = session.attempts[session.attempts.length - 1];
@@ -320,15 +342,20 @@ export function createAutomationRepairService(
             ? Number(session.connectionRef)
             : session.connectionRef,
       );
-      const result = await adapter.generateStructured<{
-        source: string;
-        explanation: string;
-      }>({
-        system: automationRepairSystemPrompt,
-        prompt: automationRepairPrompt(evidence),
-        schema: automationRepairJsonSchema,
-        schemaName: 'playwright_automation_repair',
-      });
+      const remainingMs =
+        session.maxDurationMs - (Date.now() - session.createdAt.getTime());
+      const result = await withinDeadline(
+        adapter.generateStructured<{
+          source: string;
+          explanation: string;
+        }>({
+          system: automationRepairSystemPrompt,
+          prompt: automationRepairPrompt(evidence),
+          schema: automationRepairJsonSchema,
+          schemaName: 'playwright_automation_repair',
+        }),
+        remainingMs,
+      );
       if (
         !result.value ||
         typeof result.value.source !== 'string' ||
@@ -434,6 +461,14 @@ export function createAutomationRepairService(
       }
       return (await repository.findSession(session.id))!;
     } catch (error) {
+      if (error instanceof RepairDeadlineError) {
+        await repository.updateSession(session.id, {
+          status: 'stopped',
+          stopReason: 'Time budget exhausted during provider generation',
+          completedAt: new Date(),
+        });
+        throw new ConflictError('Repair time budget exhausted');
+      }
       if (error instanceof ConflictError) throw error;
       if (error instanceof BadRequestError) {
         await repository.updateSession(session.id, {
@@ -529,6 +564,7 @@ export function createAutomationRepairService(
       return Promise.all(sessions.map((session) => syncSession(session.id)));
     },
     async processPending() {
+      await repository.stopExpiredGeneration(new Date());
       const pending = await repository.listPendingAutomatic();
       for (const item of pending) {
         try {

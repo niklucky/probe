@@ -79,6 +79,7 @@ function harness(
     output?: string;
     totalTokens?: number;
     unauthorized?: boolean;
+    providerNeverCompletes?: boolean;
   } = {},
 ) {
   let session: any;
@@ -89,6 +90,7 @@ function harness(
   const attemptWrites: any[] = [];
   const queued: any[] = [];
   let authorized = 0;
+  let expiredRecoveryCalls = 0;
   const repository = {
     async findExecution(id: number) {
       return executions.get(id);
@@ -119,6 +121,10 @@ function harness(
       if (session.status !== 'active') return undefined;
       session.status = 'running';
       return session;
+    },
+    async stopExpiredGeneration() {
+      expiredRecoveryCalls++;
+      return [];
     },
     async createAttempt(
       _sessionId: number,
@@ -190,6 +196,9 @@ function harness(
           connectionRef: 'env:test-execution',
           adapter: {
             async generateStructured() {
+              if (options.providerNeverCompletes) {
+                return await new Promise<never>(() => undefined);
+              }
               return {
                 value: {
                   source: options.output ?? repairedSource,
@@ -228,6 +237,7 @@ function harness(
     queued,
     getSession: () => session,
     getAuthorized: () => authorized,
+    getExpiredRecoveryCalls: () => expiredRecoveryCalls,
   };
 }
 
@@ -335,6 +345,23 @@ describe('bounded automation repair', () => {
     expect(state.getSession().stopReason).toBe('Attempt budget exhausted');
   });
 
+  test('bounds an in-flight provider call by the remaining time budget', async () => {
+    const state = harness({ providerNeverCompletes: true });
+    await expect(
+      state.service.request(
+        {
+          ...request,
+          limits: { ...request.limits, maxDurationSeconds: 0.05 },
+        },
+        4,
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(state.getSession().status).toBe('stopped');
+    expect(state.getSession().stopReason).toBe(
+      'Time budget exhausted during provider generation',
+    );
+  });
+
   test('records and stops a repeated equivalent repair', async () => {
     const state = harness();
     await state.service.request(request, 4);
@@ -364,5 +391,11 @@ describe('bounded automation repair', () => {
     expect(result.attempts[0]!.status).toBe('passed');
     expect(result.sourceAutomation.source).toBe(originalSource);
     expect(result.attempts[0]!.candidateAutomation.status).toBe('generated');
+  });
+
+  test('checks for abandoned generation claims on every coordinator pass', async () => {
+    const state = harness();
+    await state.service.processPending();
+    expect(state.getExpiredRecoveryCalls()).toBe(1);
   });
 });

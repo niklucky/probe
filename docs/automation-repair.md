@@ -10,12 +10,20 @@ Repair is opt-in for each failed run. The request records either
 total-token, and elapsed-time limits. Automatic sessions are advanced by the API
 coordinator and therefore continue when the review dialog is closed. Each
 candidate is validated, formatted, and executed by the normal isolated runner.
+Provider generation is bounded by the session's remaining elapsed-time budget.
+The underlying provider transport may still finish after Probe stops waiting if
+it cannot be cancelled by the adapter.
 
 Every provider call creates an audit attempt containing the provider, model,
 prompt version, token usage, sanitized evidence snapshot, explanation, source
 diff, candidate automation version, and execution result. Equivalent changes,
 invalid candidates, non-repairable diagnoses, success, and exhausted budgets
 terminate the loop predictably.
+
+The token limit is a soft ceiling because provider usage is known only after a
+call completes. Probe records the call and rejects its candidate without
+execution when that call crosses the ceiling, so usage can exceed the configured
+value by at most one bounded attempt.
 
 Provider context contains the current automation source, the linked manual test
 specification, capped and redacted logs, Playwright error text, limited
