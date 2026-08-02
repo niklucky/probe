@@ -13,7 +13,16 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertCircle, Check, Code2, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  Code2,
+  Download,
+  Play,
+  RefreshCw,
+  StopCircle,
+  Trash2,
+} from 'lucide-react';
 
 interface TestAutomationDialogProps {
   open: boolean;
@@ -41,6 +50,9 @@ export function TestAutomationDialog({
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
+  const [selectedAutomationId, setSelectedAutomationId] = useState<
+    number | null
+  >(null);
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
@@ -70,6 +82,7 @@ export function TestAutomationDialog({
       setProposalId(null);
       setSource('');
       setError('');
+      setSelectedAutomationId(null);
     }
   }, [open]);
 
@@ -77,15 +90,17 @@ export function TestAutomationDialog({
     onSuccess: (automation) => {
       setProposalId(automation.id);
       setSource(automation.source);
+      setSelectedAutomationId(automation.id);
       setError('');
       utils.testAutomations.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
   });
   const accept = trpc.testAutomations.accept.useMutation({
-    onSuccess: () => {
+    onSuccess: (automation) => {
       setProposalId(null);
       setSource('');
+      setSelectedAutomationId(automation.id);
       setError('');
       utils.testAutomations.list.invalidate({ testCaseId });
     },
@@ -107,6 +122,9 @@ export function TestAutomationDialog({
       : Number(connectionId)
     : undefined;
   const busy = generate.isPending || accept.isPending || discard.isPending;
+  const selectedAutomation = automations.find(
+    (automation) => automation.id === selectedAutomationId,
+  );
 
   const requestGeneration = () => {
     setError('');
@@ -245,8 +263,14 @@ export function TestAutomationDialog({
                 <button
                   type="button"
                   key={automation.id}
-                  className="flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50"
+                  aria-pressed={selectedAutomationId === automation.id}
+                  className={`flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50 ${
+                    selectedAutomationId === automation.id
+                      ? 'border-primary bg-muted/50'
+                      : ''
+                  }`}
                   onClick={() => {
+                    setSelectedAutomationId(automation.id);
                     if (automation.status === 'generated') {
                       setProposalId(automation.id);
                       setSource(automation.source);
@@ -282,6 +306,31 @@ export function TestAutomationDialog({
                 No automation has been generated for this test case.
               </p>
             )}
+            {selectedAutomation &&
+              selectedAutomation.status !== 'generated' && (
+                <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label
+                      htmlFor={`automation-source-${selectedAutomation.id}`}
+                    >
+                      Automation v{selectedAutomation.versionNumber} source
+                    </Label>
+                    <Badge variant="outline">Read only</Badge>
+                  </div>
+                  <Textarea
+                    id={`automation-source-${selectedAutomation.id}`}
+                    className="min-h-[360px] bg-background font-mono text-xs"
+                    value={selectedAutomation.source}
+                    readOnly
+                    spellCheck={false}
+                  />
+                </div>
+              )}
+            {selectedAutomation?.status === 'accepted' && (
+              <AutomationExecutionHistory
+                automationId={selectedAutomation.id}
+              />
+            )}
           </div>
         </div>
         <DialogFooter>
@@ -291,5 +340,165 @@ export function TestAutomationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const terminalStatuses = new Set([
+  'passed',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'infrastructure_error',
+]);
+
+function AutomationExecutionHistory({
+  automationId,
+}: {
+  automationId: number;
+}) {
+  const [error, setError] = useState('');
+  const [captureVideo, setCaptureVideo] = useState(false);
+  const utils = trpc.useContext();
+  const { data: jobs = [] } = trpc.automationExecutions.list.useQuery(
+    { automationId },
+    { refetchInterval: 2000 },
+  );
+  const queue = trpc.automationExecutions.queue.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.automationExecutions.list.invalidate({ automationId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const cancel = trpc.automationExecutions.cancel.useMutation({
+    onSuccess: () =>
+      utils.automationExecutions.list.invalidate({ automationId }),
+    onError: (requestError) => setError(requestError.message),
+  });
+  const artifactUrl = trpc.automationExecutions.artifactUrl.useMutation({
+    onSuccess: ({ url }) => window.open(url, '_blank', 'noopener,noreferrer'),
+    onError: (requestError) => setError(requestError.message),
+  });
+
+  return (
+    <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-medium">Execution history</h4>
+          <p className="text-xs text-muted-foreground">
+            Runs continue asynchronously if this dialog is closed.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureVideo}
+              onChange={(event) => setCaptureVideo(event.target.checked)}
+            />
+            Video on failure
+          </label>
+          <Button
+            size="sm"
+            disabled={queue.isPending}
+            onClick={() =>
+              queue.mutate({
+                automationId,
+                timeoutSeconds: 300,
+                captureVideo,
+              })
+            }
+          >
+            <Play className="mr-2 h-4 w-4" />
+            {queue.isPending ? 'Queuing…' : 'Run accepted version'}
+          </Button>
+        </div>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {jobs.length ? (
+        jobs.map((job) => (
+          <div key={job.id} className="rounded-md border bg-background p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Run #{job.id}</span>
+                  <Badge
+                    variant={
+                      job.status === 'passed'
+                        ? 'default'
+                        : [
+                              'failed',
+                              'timed_out',
+                              'infrastructure_error',
+                            ].includes(job.status)
+                          ? 'destructive'
+                          : 'outline'
+                    }
+                  >
+                    {job.status.replace(/_/g, ' ')}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Attempt {job.attempt}/{job.maxAttempts} · timeout{' '}
+                  {job.timeoutSeconds}s
+                  {job.resultSummary
+                    ? ` · ${job.resultSummary.durationMs}ms`
+                    : ''}
+                </p>
+              </div>
+              {!terminalStatuses.has(job.status) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={cancel.isPending}
+                  onClick={() => cancel.mutate({ id: job.id })}
+                >
+                  <StopCircle className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              )}
+            </div>
+            {job.errorMessage && (
+              <p className="mt-2 text-xs text-destructive">
+                {job.errorMessage}
+              </p>
+            )}
+            {job.structuredLogs.length > 0 && (
+              <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">
+                {job.structuredLogs
+                  .slice(-20)
+                  .map((entry) => entry.message)
+                  .join('\n')}
+              </pre>
+            )}
+            {job.artifacts && job.artifacts.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {job.artifacts.map((artifact) => (
+                  <Button
+                    key={artifact.id}
+                    size="sm"
+                    variant="outline"
+                    disabled={artifactUrl.isPending}
+                    onClick={() =>
+                      artifactUrl.mutate({
+                        jobId: job.id,
+                        artifactId: artifact.id,
+                      })
+                    }
+                  >
+                    <Download className="mr-2 h-3 w-3" />
+                    {artifact.kind}: {artifact.originalName}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This accepted automation has not been run yet.
+        </p>
+      )}
+    </div>
   );
 }

@@ -45,9 +45,15 @@ services:
       sleep 5;
       /usr/bin/mc alias set probe http://minio:9000 signal signal_password;
       /usr/bin/mc mb probe/signal-assets || true;
+      /usr/bin/mc mb probe/signal-runner-artifacts || true;
       /usr/bin/mc anonymous set download probe/signal-assets || /usr/bin/mc policy set download probe/signal-assets;
+      /usr/bin/mc anonymous set none probe/signal-runner-artifacts || true;
       exit 0;
       "
+
+  # The execution worker is intentionally a separate opt-in process. Run
+  # `bun run runner:dev` on the host after creating the restricted
+  # `probe-runner-egress` Docker network described in docs/automation-runner.md.
 
   # Port reference for Probe project (11000-11100):
   # 11001 - Postgres
