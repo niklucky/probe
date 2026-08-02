@@ -31,6 +31,8 @@ import { createTestAutomationRepository } from '../repositories/test-automations
 import { createTestAutomationService } from '../services/test-automations/service';
 import { createAutomationExecutionRepository } from '../repositories/automation-executions/repository';
 import { createAutomationExecutionService } from '../services/automation-executions/service';
+import { createAutomationRepairRepository } from '../repositories/automation-repairs/repository';
+import { createAutomationRepairService } from '../services/automation-repairs/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -68,6 +70,15 @@ export function createServices() {
     createEnvironmentRepository(),
     authorization,
   );
+  const runnerDefaults = {
+    version: serverEnv.RUNNER_VERSION,
+    containerImage: serverEnv.RUNNER_CONTAINER_IMAGE,
+    cpuLimit: serverEnv.RUNNER_CPU_LIMIT,
+    memoryMb: serverEnv.RUNNER_MEMORY_MB,
+    processLimit: serverEnv.RUNNER_PROCESS_LIMIT,
+    artifactLimitMb: serverEnv.RUNNER_ARTIFACT_LIMIT_MB,
+    networkPolicy: serverEnv.RUNNER_NETWORK_POLICY,
+  };
   return {
     auth: createAuthService(userRepository),
     files: createFileService(
@@ -97,15 +108,13 @@ export function createServices() {
       authorization,
       artifactDownloadStorage,
       serverEnv.RUNNER_ARTIFACT_BUCKET,
-      {
-        version: serverEnv.RUNNER_VERSION,
-        containerImage: serverEnv.RUNNER_CONTAINER_IMAGE,
-        cpuLimit: serverEnv.RUNNER_CPU_LIMIT,
-        memoryMb: serverEnv.RUNNER_MEMORY_MB,
-        processLimit: serverEnv.RUNNER_PROCESS_LIMIT,
-        artifactLimitMb: serverEnv.RUNNER_ARTIFACT_LIMIT_MB,
-        networkPolicy: serverEnv.RUNNER_NETWORK_POLICY,
-      },
+      runnerDefaults,
+    ),
+    automationRepairs: createAutomationRepairService(
+      createAutomationRepairRepository(),
+      authorization,
+      aiConnections,
+      runnerDefaults,
     ),
     projects: createProjectService(createProjectRepository(), authorization),
     products: createProductService(createProductRepository(), authorization),

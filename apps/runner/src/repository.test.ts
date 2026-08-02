@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { staleRecoveryValues } from './repository';
+import { isRunnableExecutionSnapshot, staleRecoveryValues } from './repository';
 
 describe('abandoned execution recovery', () => {
   test('requeues a stale job when a retry remains', () => {
@@ -30,5 +30,47 @@ describe('abandoned execution recovery', () => {
     expect(values.status).toBe('infrastructure_error');
     expect(values.errorCode).toBe('WORKER_ABANDONED');
     expect(values.completedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('execution snapshot validation', () => {
+  const payload = {
+    environmentId: 9,
+    automation: { id: 7, environmentId: 9, status: 'generated' },
+  };
+
+  test('allows generated automation only when linked to its running repair attempt', () => {
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        repairAttempts: [{ candidateAutomationId: 7, status: 'running' }],
+      }),
+    ).toBe(true);
+    expect(isRunnableExecutionSnapshot(payload)).toBe(false);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        repairAttempts: [{ candidateAutomationId: 8, status: 'running' }],
+      }),
+    ).toBe(false);
+  });
+
+  test('continues to allow accepted automation with a matching environment', () => {
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(true);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        automation: {
+          ...payload.automation,
+          status: 'accepted',
+          environmentId: 10,
+        },
+      }),
+    ).toBe(false);
   });
 });

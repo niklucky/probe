@@ -36,6 +36,28 @@ export function staleRecoveryValues(job: {
   };
 }
 
+export function isRunnableExecutionSnapshot(payload: {
+  environmentId: number;
+  automation: { id: number; environmentId: number; status: string };
+  repairAttempts?: Array<{
+    candidateAutomationId: number;
+    status: string;
+  }>;
+}) {
+  if (payload.automation.environmentId !== payload.environmentId) return false;
+  if (payload.automation.status === 'accepted') return true;
+  return (
+    payload.automation.status === 'generated' &&
+    Boolean(
+      payload.repairAttempts?.some(
+        (attempt) =>
+          attempt.candidateAutomationId === payload.automation.id &&
+          attempt.status === 'running',
+      ),
+    )
+  );
+}
+
 export function createRunnerRepository(database: Database = db) {
   return {
     claim(workerId: string) {
@@ -72,7 +94,7 @@ export function createRunnerRepository(database: Database = db) {
     getPayload(id: number) {
       return database.query.automationExecutionJobs.findFirst({
         where: eq(automationExecutionJobs.id, id),
-        with: { automation: true, environment: true },
+        with: { automation: true, environment: true, repairAttempts: true },
       });
     },
     async start(id: number, workerId: string) {

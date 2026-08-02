@@ -22,6 +22,7 @@ import {
   RefreshCw,
   StopCircle,
   Trash2,
+  Wrench,
 } from 'lucide-react';
 
 interface TestAutomationDialogProps {
@@ -492,6 +493,9 @@ function AutomationExecutionHistory({
                 ))}
               </div>
             )}
+            {['failed', 'timed_out'].includes(job.status) && (
+              <AutomationRepairPanel executionId={job.id} />
+            )}
           </div>
         ))
       ) : (
@@ -499,6 +503,254 @@ function AutomationExecutionHistory({
           This accepted automation has not been run yet.
         </p>
       )}
+    </div>
+  );
+}
+
+function AutomationRepairPanel({ executionId }: { executionId: number }) {
+  const [mode, setMode] = useState<'review' | 'automatic'>('review');
+  const [maxAttempts, setMaxAttempts] = useState(2);
+  const [maxTotalTokens, setMaxTotalTokens] = useState(20_000);
+  const [maxDurationSeconds, setMaxDurationSeconds] = useState(600);
+  const [connectionId, setConnectionId] = useState('');
+  const [error, setError] = useState('');
+  const utils = trpc.useContext();
+  const { data: sessions = [] } = trpc.automationRepairs.list.useQuery(
+    { executionId },
+    { refetchInterval: 2000 },
+  );
+  const { data: connections = [] } = trpc.aiConnections.available.useQuery({
+    scope: 'test-execution',
+  });
+  const session = sessions[0];
+  const request = trpc.automationRepairs.request.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.automationRepairs.list.invalidate({ executionId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const continueRepair = trpc.automationRepairs.continue.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.automationRepairs.list.invalidate({ executionId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const execute = trpc.automationRepairs.execute.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.automationRepairs.list.invalidate({ executionId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const promote = trpc.testAutomations.accept.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.testAutomations.list.invalidate();
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const latestAttempt = session?.attempts[session.attempts.length - 1];
+
+  if (!session) {
+    return (
+      <div className="mt-3 grid gap-2 rounded-md border border-dashed p-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Wrench className="h-4 w-4" />
+          Bounded AI repair
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Probe classifies the failure before sending sanitized, size-limited
+          evidence to an AI provider. Repair never changes the accepted source.
+        </p>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <label className="grid gap-1 text-xs">
+            Mode
+            <select
+              className="h-8 rounded border bg-background px-2"
+              value={mode}
+              onChange={(event) =>
+                setMode(event.target.value as 'review' | 'automatic')
+              }
+            >
+              <option value="review">Review before retry</option>
+              <option value="automatic">Automatic (opt-in)</option>
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs">
+            Attempts
+            <input
+              className="h-8 rounded border bg-background px-2"
+              type="number"
+              min={1}
+              max={5}
+              value={maxAttempts}
+              onChange={(event) => setMaxAttempts(Number(event.target.value))}
+            />
+          </label>
+          <label className="grid gap-1 text-xs">
+            Token budget
+            <input
+              className="h-8 rounded border bg-background px-2"
+              type="number"
+              min={100}
+              value={maxTotalTokens}
+              onChange={(event) =>
+                setMaxTotalTokens(Number(event.target.value))
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-xs">
+            Total seconds
+            <input
+              className="h-8 rounded border bg-background px-2"
+              type="number"
+              min={30}
+              value={maxDurationSeconds}
+              onChange={(event) =>
+                setMaxDurationSeconds(Number(event.target.value))
+              }
+            />
+          </label>
+        </div>
+        <label className="grid gap-1 text-xs">
+          AI connection
+          <select
+            className="h-8 rounded border bg-background px-2"
+            value={connectionId}
+            onChange={(event) => setConnectionId(event.target.value)}
+          >
+            <option value="">Default test-execution connection</option>
+            {connections.map((connection) => (
+              <option key={connection.id} value={String(connection.id)}>
+                {connection.name} — {connection.model}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={request.isPending}
+          onClick={() =>
+            request.mutate({
+              executionId,
+              mode,
+              connectionId: connectionId
+                ? connectionId.startsWith('env:')
+                  ? connectionId
+                  : Number(connectionId)
+                : undefined,
+              limits: { maxAttempts, maxTotalTokens, maxDurationSeconds },
+            })
+          }
+        >
+          <Wrench className="mr-2 h-4 w-4" />
+          {request.isPending ? 'Diagnosing…' : 'Diagnose and propose repair'}
+        </Button>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 grid gap-3 rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Wrench className="h-4 w-4" /> Repair session #{session.id}
+            <Badge variant="outline">{session.classification}</Badge>
+            <Badge variant="outline">{session.status.replace(/_/g, ' ')}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {session.diagnosis}
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {session.attempts.length}/{session.maxAttempts} attempts ·{' '}
+          {session.usedTokens}/{session.maxTotalTokens} tokens
+        </p>
+      </div>
+      {session.stopReason && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{session.stopReason}</AlertDescription>
+        </Alert>
+      )}
+      {session.attempts.map((attempt) => (
+        <div key={attempt.id} className="grid gap-2 rounded border p-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium">
+              Attempt {attempt.attemptNumber} · candidate automation v
+              {attempt.candidateAutomation.versionNumber}
+            </span>
+            <Badge
+              variant={attempt.status === 'passed' ? 'default' : 'outline'}
+            >
+              {attempt.status}
+            </Badge>
+          </div>
+          <p className="text-xs">{attempt.explanation}</p>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[11px]">
+            {attempt.sourceDiff}
+          </pre>
+          <p className="text-[11px] text-muted-foreground">
+            {attempt.provider}/{attempt.model} · prompt {attempt.promptVersion}
+            {attempt.totalTokens ? ` · ${attempt.totalTokens} tokens` : ''}
+          </p>
+          <div className="flex justify-end gap-2">
+            {session.status === 'awaiting_review' &&
+              attempt.status === 'generated' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={execute.isPending}
+                  onClick={() =>
+                    execute.mutate({
+                      sessionId: session.id,
+                      attemptId: attempt.id,
+                    })
+                  }
+                >
+                  <Play className="mr-2 h-3 w-3" /> Run candidate
+                </Button>
+              )}
+            {attempt.status === 'passed' &&
+              attempt.candidateAutomation.status === 'generated' && (
+                <Button
+                  size="sm"
+                  disabled={promote.isPending}
+                  onClick={() =>
+                    promote.mutate({
+                      id: attempt.candidateAutomation.id,
+                      source: attempt.candidateAutomation.source,
+                    })
+                  }
+                >
+                  <Check className="mr-2 h-3 w-3" /> Promote explicitly
+                </Button>
+              )}
+          </div>
+        </div>
+      ))}
+      {session.mode === 'review' &&
+        session.status === 'active' &&
+        latestAttempt?.status === 'failed' && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={continueRepair.isPending}
+            onClick={() => continueRepair.mutate({ id: session.id })}
+          >
+            <RefreshCw className="mr-2 h-3 w-3" /> Propose next bounded attempt
+          </Button>
+        )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <p className="text-[11px] text-muted-foreground">
+        A passing repair confirms only this automation run; it does not prove
+        the application is correct. Manual test-case versions are never changed.
+      </p>
     </div>
   );
 }

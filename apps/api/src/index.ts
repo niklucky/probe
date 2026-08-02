@@ -4,6 +4,19 @@ import { app } from './server';
 async function startServer() {
   try {
     await services.system.runMigrations();
+    const scheduleRepairCoordinator = () => {
+      const timer = setTimeout(async () => {
+        try {
+          await services.automationRepairs.processPending();
+        } catch (error) {
+          console.error('Repair coordinator failed', error);
+        } finally {
+          scheduleRepairCoordinator();
+        }
+      }, 2_000);
+      timer.unref();
+    };
+    scheduleRepairCoordinator();
     const port = serverEnv.PORT;
     console.log(`🚀 Server ready at http://localhost:${port}`);
     console.log(`➜ TRPC endpoint: http://localhost:${port}/trpc`);
