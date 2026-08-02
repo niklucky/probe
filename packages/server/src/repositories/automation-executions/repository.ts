@@ -5,8 +5,6 @@ import {
   db,
   desc,
   eq,
-  inArray,
-  not,
   testAutomations,
 } from '@probe/db';
 
@@ -56,42 +54,43 @@ export function createAutomationExecutionRepository(database: Database = db) {
       });
     },
     async requestCancellation(id: number) {
-      const now = new Date();
-      const [job] = await database
-        .update(automationExecutionJobs)
-        .set({
-          cancellationRequestedAt: now,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(automationExecutionJobs.id, id),
-            not(
-              inArray(automationExecutionJobs.status, [
-                'passed',
-                'failed',
-                'timed_out',
-                'cancelled',
-                'infrastructure_error',
-              ]),
-            ),
-          ),
-        )
-        .returning();
-      if (job && (job.status === 'queued' || job.status === 'claimed')) {
-        const [cancelled] = await database
+      return database.transaction(async (transaction) => {
+        const [job] = await transaction
+          .select()
+          .from(automationExecutionJobs)
+          .where(eq(automationExecutionJobs.id, id))
+          .limit(1)
+          .for('update');
+        if (
+          !job ||
+          [
+            'passed',
+            'failed',
+            'timed_out',
+            'cancelled',
+            'infrastructure_error',
+          ].includes(job.status)
+        ) {
+          return undefined;
+        }
+
+        const now = new Date();
+        const [updated] = await transaction
           .update(automationExecutionJobs)
-          .set({ status: 'cancelled', completedAt: now, updatedAt: now })
-          .where(
-            and(
-              eq(automationExecutionJobs.id, id),
-              eq(automationExecutionJobs.status, job.status),
-            ),
+          .set(
+            job.status === 'queued' || job.status === 'claimed'
+              ? {
+                  status: 'cancelled',
+                  cancellationRequestedAt: now,
+                  completedAt: now,
+                  updatedAt: now,
+                }
+              : { cancellationRequestedAt: now, updatedAt: now },
           )
+          .where(eq(automationExecutionJobs.id, id))
           .returning();
-        return cancelled ?? job;
-      }
-      return job;
+        return updated;
+      });
     },
     findArtifact(id: number, jobId: number) {
       return database.query.automationExecutionArtifacts.findFirst({

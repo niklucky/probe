@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import { runnerConfig } from './config';
 import {
   artifactMetadata,
+  cleanupAbandonedExecution,
   executeInContainer,
   listArtifactFiles,
   selectRuntimeSecrets,
@@ -153,7 +154,11 @@ async function main() {
       const before = new Date(
         Date.now() - runnerConfig.RUNNER_STALE_SECONDS * 1000,
       );
-      const recovered = await repository.recoverStale(before);
+      const recovered = await repository.recoverStale(
+        before,
+        runnerConfig.RUNNER_ID,
+        cleanupAbandonedExecution,
+      );
       if (recovered) console.log(`Recovered ${recovered} abandoned job(s)`);
       lastRecovery = Date.now();
     }

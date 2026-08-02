@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  artifactMetadata,
   buildDockerArgs,
+  classifyExecutionStatus,
   redactSecrets,
   selectRuntimeSecrets,
   type ExecutionPayload,
@@ -40,6 +42,8 @@ describe('isolated execution command', () => {
     expect(args).toContain('--pids-limit=64');
     expect(args).toContain('--ulimit=fsize=268435456');
     expect(args).toContain('--network=probe-runner-egress');
+    expect(args).toContain('--label=probe.runner.managed=true');
+    expect(args).toContain('--label=probe.execution.job=42');
     expect(args.join(' ')).toContain('readonly');
   });
 
@@ -106,5 +110,40 @@ describe('isolated execution command', () => {
         ),
       ).toThrow('dedicated egress-controlled Docker network');
     }
+  });
+
+  test('maps process outcomes to the public execution statuses', () => {
+    const outcome = {
+      infrastructureError: false,
+      artifactLimitExceeded: false,
+      cancelled: false,
+      timedOut: false,
+      exitCode: 0,
+    };
+    expect(classifyExecutionStatus(outcome)).toBe('passed');
+    expect(classifyExecutionStatus({ ...outcome, exitCode: 1 })).toBe('failed');
+    expect(classifyExecutionStatus({ ...outcome, timedOut: true })).toBe(
+      'timed_out',
+    );
+    expect(classifyExecutionStatus({ ...outcome, cancelled: true })).toBe(
+      'cancelled',
+    );
+    expect(classifyExecutionStatus({ ...outcome, exitCode: 125 })).toBe(
+      'infrastructure_error',
+    );
+    expect(
+      classifyExecutionStatus({ ...outcome, artifactLimitExceeded: true }),
+    ).toBe('infrastructure_error');
+  });
+
+  test('assigns accurate MIME types to generated reports', () => {
+    expect(artifactMetadata('/tmp/report.html')).toEqual({
+      kind: 'log',
+      mimeType: 'text/html',
+    });
+    expect(artifactMetadata('/tmp/results.json')).toEqual({
+      kind: 'log',
+      mimeType: 'application/json',
+    });
   });
 });

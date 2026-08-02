@@ -23,8 +23,10 @@ Jobs transition through `queued`, `claimed`, `running`, and exactly one of
 Claiming uses a PostgreSQL transaction with `FOR UPDATE SKIP LOCKED`, so two
 workers cannot claim the same row. A worker heartbeats while Docker runs.
 Another worker moves an abandoned job back to `queued`; after `maxAttempts`, it
-finishes it as `infrastructure_error`. Queued and claimed cancellation is
-immediate, while running cancellation stops the disposable container.
+finishes it as `infrastructure_error`. Before retrying, the recovering worker
+force-removes the abandoned job's named container and temporary workspace.
+Queued and claimed cancellation is immediate, while running cancellation stops
+the disposable container.
 
 Execution settings persist with every job, including the exact automation id,
 environment id, runner version, image, timeout, CPU, memory, PID, video, and
@@ -67,6 +69,11 @@ after `RUNNER_ARTIFACT_RETENTION_DAYS` (14 days by default). Deployments should
 configure a matching MinIO lifecycle rule to delete objects under
 `automation-executions/` after that period.
 
+`MINIO_PUBLIC_URL` must be an origin without a path (for example,
+`https://storage.example.com`) that the user's browser can reach. The API uses
+that origin when signing artifact downloads; `MINIO_ENDPOINT` remains the
+runner/API's internal MinIO address.
+
 ## Operational configuration
 
 API:
@@ -79,6 +86,7 @@ API:
 - `RUNNER_ARTIFACT_LIMIT_MB`
 - `RUNNER_NETWORK_POLICY`
 - `RUNNER_ARTIFACT_BUCKET`
+- `MINIO_PUBLIC_URL`, set to the browser-reachable MinIO origin
 
 Worker:
 

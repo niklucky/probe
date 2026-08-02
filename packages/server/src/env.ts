@@ -51,7 +51,24 @@ const rawServerEnvSchema = z.object({
   MINIO_ACCESS_KEY: z.string().min(1).default('signal'),
   MINIO_SECRET_KEY: z.string().min(1).default('signal_password'),
   MINIO_BUCKET: z.string().min(1).default('signal-assets'),
-  MINIO_PUBLIC_URL: z.string().url().optional(),
+  MINIO_PUBLIC_URL: z
+    .string()
+    .url()
+    .refine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          ['http:', 'https:'].includes(url.protocol) &&
+          !url.username &&
+          !url.password &&
+          url.pathname === '/' &&
+          !url.search &&
+          !url.hash
+        );
+      },
+      'must be an HTTP(S) origin without credentials, path, query, or fragment',
+    )
+    .optional(),
   RUNNER_VERSION: z.string().min(1).default('1'),
   RUNNER_CONTAINER_IMAGE: z
     .string()

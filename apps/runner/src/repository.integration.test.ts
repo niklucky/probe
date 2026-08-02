@@ -137,7 +137,17 @@ integrationTest(
         .update(automationExecutionJobs)
         .set({ status: 'running', heartbeatAt: staleHeartbeat })
         .where(eq(automationExecutionJobs.id, claimed.id));
-      expect(await repository.recoverStale(new Date())).toBe(1);
+      const cleanedJobIds: number[] = [];
+      expect(
+        await repository.recoverStale(
+          new Date(),
+          `worker-recovery-${suffix}`,
+          async (jobId) => {
+            cleanedJobIds.push(jobId);
+          },
+        ),
+      ).toBe(1);
+      expect(cleanedJobIds).toEqual([claimed.id]);
 
       const recovered = await db.query.automationExecutionJobs.findFirst({
         where: eq(automationExecutionJobs.id, claimed.id),

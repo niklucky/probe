@@ -179,26 +179,52 @@ export function createRunnerRepository(database: Database = db) {
         .delete(automationExecutionArtifacts)
         .where(eq(automationExecutionArtifacts.id, id));
     },
-    async recoverStale(before: Date) {
+    async recoverStale(
+      before: Date,
+      recoveryWorkerId = 'recovery',
+      beforeRecover: (jobId: number) => Promise<void> = async () => undefined,
+    ) {
       const stale = await database.query.automationExecutionJobs.findMany({
         where: and(
           inArray(automationExecutionJobs.status, ['claimed', 'running']),
           lt(automationExecutionJobs.heartbeatAt, before),
         ),
       });
+      let recovered = 0;
       for (const job of stale) {
-        await database
+        const recoveryAt = new Date();
+        const recoveryOwner = `${recoveryWorkerId}:recovery`;
+        const [owned] = await database
           .update(automationExecutionJobs)
-          .set(staleRecoveryValues(job))
+          .set({
+            workerId: recoveryOwner,
+            heartbeatAt: recoveryAt,
+            updatedAt: recoveryAt,
+          })
           .where(
             and(
               eq(automationExecutionJobs.id, job.id),
               eq(automationExecutionJobs.status, job.status),
               eq(automationExecutionJobs.heartbeatAt, job.heartbeatAt!),
             ),
+          )
+          .returning();
+        if (!owned) continue;
+
+        await beforeRecover(job.id);
+        await database
+          .update(automationExecutionJobs)
+          .set(staleRecoveryValues(owned))
+          .where(
+            and(
+              eq(automationExecutionJobs.id, owned.id),
+              eq(automationExecutionJobs.workerId, recoveryOwner),
+              eq(automationExecutionJobs.heartbeatAt, recoveryAt),
+            ),
           );
+        recovered += 1;
       }
-      return stale.length;
+      return recovered;
     },
   };
 }

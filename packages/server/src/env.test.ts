@@ -27,6 +27,13 @@ describe('server environment', () => {
       scope: 'general',
       enabled: true,
     });
+
+    const publicStorage = parseServerEnv({
+      MINIO_ENDPOINT: 'minio',
+      MINIO_PORT: '9000',
+      MINIO_PUBLIC_URL: 'https://storage.example.test',
+    });
+    expect(publicStorage.MINIO_PUBLIC_URL).toBe('https://storage.example.test');
   });
 
   test('rejects malformed JSON and invalid master keys', () => {
@@ -39,5 +46,18 @@ describe('server environment', () => {
     expect(() => parseServerEnv({ RUNNER_NETWORK_POLICY: 'host' })).toThrow(
       'RUNNER_NETWORK_POLICY',
     );
+    expect(() =>
+      parseServerEnv({
+        MINIO_PUBLIC_URL: 'https://storage.example.test/minio',
+      }),
+    ).toThrow('MINIO_PUBLIC_URL');
+    expect(() =>
+      parseServerEnv({
+        MINIO_PUBLIC_URL: 'https://storage.example.test?internal=true',
+      }),
+    ).toThrow('MINIO_PUBLIC_URL');
+    expect(() =>
+      parseServerEnv({ MINIO_PUBLIC_URL: 'ftp://storage.example.test' }),
+    ).toThrow('MINIO_PUBLIC_URL');
   });
 });

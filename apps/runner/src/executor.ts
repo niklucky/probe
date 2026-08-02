@@ -43,7 +43,34 @@ export interface ExecutionResult {
   cleanup: () => Promise<void>;
 }
 
+interface ExecutionOutcome {
+  infrastructureError: boolean;
+  artifactLimitExceeded: boolean;
+  cancelled: boolean;
+  timedOut: boolean;
+  exitCode: number;
+}
+
 const MAX_LOG_BYTES = 512_000;
+
+export function classifyExecutionStatus({
+  infrastructureError,
+  artifactLimitExceeded,
+  cancelled,
+  timedOut,
+  exitCode,
+}: ExecutionOutcome): ExecutionResult['status'] {
+  if (
+    infrastructureError ||
+    artifactLimitExceeded ||
+    [125, 126, 127].includes(exitCode)
+  ) {
+    return 'infrastructure_error';
+  }
+  if (cancelled) return 'cancelled';
+  if (timedOut) return 'timed_out';
+  return exitCode === 0 ? 'passed' : 'failed';
+}
 
 export function selectRuntimeSecrets(
   source: string,
@@ -95,6 +122,8 @@ export function buildDockerArgs(
     '--rm',
     '--name',
     containerName,
+    '--label=probe.runner.managed=true',
+    `--label=probe.execution.job=${payload.id}`,
     '--read-only',
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges',
@@ -150,6 +179,27 @@ function runCommand(command: string, args: string[]) {
   });
 }
 
+export async function cleanupAbandonedExecution(jobId: number) {
+  await runCommand('docker', [
+    'rm',
+    '--force',
+    `probe-execution-${jobId}`,
+  ]).catch(() => undefined);
+  const prefix = `probe-run-${jobId}-`;
+  const entries = await readdir(tmpdir(), { withFileTypes: true }).catch(
+    () => [],
+  );
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+      .map((entry) =>
+        rm(join(tmpdir(), entry.name), { recursive: true, force: true }).catch(
+          () => undefined,
+        ),
+      ),
+  );
+}
+
 export async function executeInContainer(
   payload: ExecutionPayload,
   secrets: Record<string, string>,
@@ -164,7 +214,9 @@ export async function executeInContainer(
   await chmod(artifactDirectory, 0o777);
   await writeFile(join(artifactDirectory, '.keep'), '');
   const sourcePath = join(directory, 'automation.spec.ts');
-  await writeFile(sourcePath, payload.automation.source, { mode: 0o400 });
+  // The bind mount is read-only; world-readability lets the image's
+  // unprivileged pwuser read a file owned by the host runner on Linux.
+  await writeFile(sourcePath, payload.automation.source, { mode: 0o444 });
   const { containerName, args } = buildDockerArgs(
     payload,
     sourcePath,
@@ -173,7 +225,8 @@ export async function executeInContainer(
   );
 
   const startedAt = Date.now();
-  let output = '';
+  let outputBytes = 0;
+  const outputChunks: Array<{ at: string; value: Buffer }> = [];
   let timedOut = false;
   let cancelled = false;
   let artifactLimitExceeded = false;
@@ -192,9 +245,11 @@ export async function executeInContainer(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const append = (chunk: Buffer) => {
-      const remaining = MAX_LOG_BYTES - Buffer.byteLength(output);
+      const remaining = MAX_LOG_BYTES - outputBytes;
       if (remaining <= 0) return;
-      output += chunk.toString('utf8').slice(0, remaining);
+      const value = Buffer.from(chunk).subarray(0, remaining);
+      outputChunks.push({ at: new Date().toISOString(), value });
+      outputBytes += value.byteLength;
     };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
@@ -202,25 +257,42 @@ export async function executeInContainer(
       infrastructureError = error;
     });
 
-    const monitor = setInterval(async () => {
-      if (timedOut || cancelled || artifactLimitExceeded) return;
-      if (Date.now() - startedAt >= payload.timeoutSeconds * 1000) {
-        timedOut = true;
-        await stop();
+    let monitorRunning = false;
+    let monitorTask: Promise<void> = Promise.resolve();
+    const monitor = setInterval(() => {
+      if (monitorRunning || timedOut || cancelled || artifactLimitExceeded) {
         return;
       }
-      if (
-        (await directorySize(artifactDirectory)) >
-        payload.settings.artifactLimitMb * 1024 * 1024
-      ) {
-        artifactLimitExceeded = true;
-        await stop();
-        return;
-      }
-      if (await hooks.heartbeat()) {
-        cancelled = true;
-        await stop();
-      }
+      monitorRunning = true;
+      monitorTask = (async () => {
+        try {
+          if (Date.now() - startedAt >= payload.timeoutSeconds * 1000) {
+            timedOut = true;
+            await stop();
+            return;
+          }
+          if (
+            (await directorySize(artifactDirectory)) >
+            payload.settings.artifactLimitMb * 1024 * 1024
+          ) {
+            artifactLimitExceeded = true;
+            await stop();
+            return;
+          }
+          if (await hooks.heartbeat()) {
+            cancelled = true;
+            await stop();
+          }
+        } catch (error) {
+          infrastructureError =
+            error instanceof Error
+              ? error
+              : new Error('Execution monitor failed');
+          await stop();
+        } finally {
+          monitorRunning = false;
+        }
+      })();
     }, 2000);
     const exitCode = await new Promise<number>((resolveExit) => {
       let settled = false;
@@ -233,22 +305,20 @@ export async function executeInContainer(
       child?.once('error', () => settle(127));
     });
     clearInterval(monitor);
+    await monitorTask;
 
-    const sanitized = redactSecrets(output, secrets);
+    const sanitized = redactSecrets(
+      Buffer.concat(outputChunks.map(({ value }) => value)).toString('utf8'),
+      secrets,
+    );
     const durationMs = Date.now() - startedAt;
-    const containerFailure =
-      Boolean(infrastructureError) || [125, 126, 127].includes(exitCode);
-    const status = containerFailure
-      ? 'infrastructure_error'
-      : artifactLimitExceeded
-        ? 'infrastructure_error'
-        : cancelled
-          ? 'cancelled'
-          : timedOut
-            ? 'timed_out'
-            : exitCode === 0
-              ? 'passed'
-              : 'failed';
+    const status = classifyExecutionStatus({
+      infrastructureError: Boolean(infrastructureError),
+      artifactLimitExceeded,
+      cancelled,
+      timedOut,
+      exitCode,
+    });
     const errorCode =
       status === 'infrastructure_error'
         ? artifactLimitExceeded
@@ -279,15 +349,14 @@ export async function executeInContainer(
               (infrastructureError
                 ? redactSecrets(infrastructureError.message, secrets)
                 : undefined),
-      logs: sanitized
-        .split('\n')
-        .filter(Boolean)
-        .slice(-200)
-        .map((message) => ({
-          at: new Date().toISOString(),
-          level: 'info',
-          message,
-        })),
+      logs: outputChunks
+        .flatMap(({ at, value }) =>
+          redactSecrets(value.toString('utf8'), secrets)
+            .split('\n')
+            .filter(Boolean)
+            .map((message) => ({ at, level: 'info', message })),
+        )
+        .slice(-200),
       artifactDirectory,
       cleanup: () => rm(directory, { recursive: true, force: true }),
     };
@@ -355,6 +424,12 @@ export function artifactMetadata(path: string) {
   }
   if (name.endsWith('.png')) {
     return { kind: 'screenshot' as const, mimeType: 'image/png' };
+  }
+  if (name.endsWith('.html')) {
+    return { kind: 'log' as const, mimeType: 'text/html' };
+  }
+  if (name.endsWith('.json')) {
+    return { kind: 'log' as const, mimeType: 'application/json' };
   }
   return { kind: 'log' as const, mimeType: 'text/plain' };
 }

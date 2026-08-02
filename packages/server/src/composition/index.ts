@@ -44,6 +44,18 @@ export function createServices() {
     accessKey: serverEnv.MINIO_ACCESS_KEY,
     secretKey: serverEnv.MINIO_SECRET_KEY,
   });
+  const publicStorageUrl = new URL(serverEnv.MINIO_PUBLIC_URL);
+  const artifactDownloadStorage = new Client({
+    endPoint: publicStorageUrl.hostname,
+    port: publicStorageUrl.port
+      ? Number(publicStorageUrl.port)
+      : publicStorageUrl.protocol === 'https:'
+        ? 443
+        : 80,
+    useSSL: publicStorageUrl.protocol === 'https:',
+    accessKey: serverEnv.MINIO_ACCESS_KEY,
+    secretKey: serverEnv.MINIO_SECRET_KEY,
+  });
   const aiConnections = createAiConnectionService(
     createAiConnectionRepository(),
     createCredentialCipher(),
@@ -83,7 +95,7 @@ export function createServices() {
     automationExecutions: createAutomationExecutionService(
       createAutomationExecutionRepository(),
       authorization,
-      storage,
+      artifactDownloadStorage,
       serverEnv.RUNNER_ARTIFACT_BUCKET,
       {
         version: serverEnv.RUNNER_VERSION,
