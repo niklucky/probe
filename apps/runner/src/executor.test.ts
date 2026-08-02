@@ -38,7 +38,7 @@ describe('isolated execution command', () => {
     expect(args).toContain('--memory-swap=512m');
     expect(args).toContain('--shm-size=256m');
     expect(args).toContain('--pids-limit=64');
-    expect(args).toContain('--ulimit=fsize=262144');
+    expect(args).toContain('--ulimit=fsize=268435456');
     expect(args).toContain('--network=probe-runner-egress');
     expect(args.join(' ')).toContain('readonly');
   });

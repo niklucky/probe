@@ -103,7 +103,8 @@ export function buildDockerArgs(
     `--memory-swap=${payload.settings.memoryMb}m`,
     '--shm-size=256m',
     `--pids-limit=${payload.settings.processLimit}`,
-    `--ulimit=fsize=${payload.settings.artifactLimitMb * 1024}`,
+    // OCI RLIMIT_FSIZE values are bytes (shell `ulimit -f` displays blocks).
+    `--ulimit=fsize=${payload.settings.artifactLimitMb * 1024 * 1024}`,
     `--network=${payload.settings.networkPolicy}`,
     '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=256m',
     `--mount=type=bind,src=${resolve(sourcePath)},dst=/workspace/tests/automation.spec.ts,readonly`,
