@@ -7,3 +7,4 @@ export * from './schemas/test-cases';
 export * from './schemas/ai-authoring';
 export * from './schemas/test-automations';
 export * from './schemas/automation-executions';
+export * from './schemas/automation-repairs';

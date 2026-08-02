@@ -64,6 +64,13 @@
       "when": 1785200095269,
       "tag": "0008_lame_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785711541028,
+      "tag": "0009_ambitious_speedball",
+      "breakpoints": true
     }
   ]
 }

@@ -105,6 +105,25 @@ export const automationArtifactKindEnum = pgEnum('automation_artifact_kind', [
   'video',
   'log',
 ]);
+export const automationRepairModeEnum = pgEnum('automation_repair_mode', [
+  'review',
+  'automatic',
+]);
+export const automationRepairClassificationEnum = pgEnum(
+  'automation_repair_classification',
+  ['automation', 'product', 'timeout', 'infrastructure', 'unknown'],
+);
+export const automationRepairStatusEnum = pgEnum('automation_repair_status', [
+  'active',
+  'awaiting_review',
+  'running',
+  'succeeded',
+  'stopped',
+]);
+export const automationRepairAttemptStatusEnum = pgEnum(
+  'automation_repair_attempt_status',
+  ['generated', 'running', 'passed', 'failed', 'rejected'],
+);
 
 // Users table
 export const users = pgTable('users', {
@@ -563,6 +582,99 @@ export const automationExecutionArtifacts = pgTable(
   }),
 );
 
+// A repair session is an explicit, bounded request against one failed run.
+// Candidate source lives in a new test_automations row and is never copied
+// over the accepted automation. Evidence snapshots contain sanitized text and
+// artifact metadata only, never object names, artifact bytes, or credentials.
+export const automationRepairSessions = pgTable(
+  'automation_repair_sessions',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => projects.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceExecutionId: integer('source_execution_id')
+      .references(() => automationExecutionJobs.id, { onDelete: 'restrict' })
+      .notNull(),
+    sourceAutomationId: integer('source_automation_id')
+      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .notNull(),
+    requestedById: integer('requested_by_id')
+      .references(() => users.id)
+      .notNull(),
+    mode: automationRepairModeEnum('mode').notNull(),
+    classification:
+      automationRepairClassificationEnum('classification').notNull(),
+    diagnosis: varchar('diagnosis', { length: 1000 }).notNull(),
+    status: automationRepairStatusEnum('status').notNull().default('active'),
+    connectionRef: varchar('connection_ref', { length: 255 }),
+    maxAttempts: integer('max_attempts').notNull(),
+    maxTotalTokens: integer('max_total_tokens').notNull(),
+    maxDurationMs: integer('max_duration_ms').notNull(),
+    usedTokens: integer('used_tokens').notNull().default(0),
+    promptVersion: varchar('prompt_version', { length: 100 }).notNull(),
+    stopReason: varchar('stop_reason', { length: 500 }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    completedAt: timestamp('completed_at'),
+  },
+  (table) => ({
+    sourceExecutionIndex: index(
+      'automation_repair_sessions_execution_index',
+    ).on(table.sourceExecutionId, table.createdAt),
+    projectIndex: index('automation_repair_sessions_project_index').on(
+      table.projectId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const automationRepairAttempts = pgTable(
+  'automation_repair_attempts',
+  {
+    id: serial('id').primaryKey(),
+    sessionId: integer('session_id')
+      .references(() => automationRepairSessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    candidateAutomationId: integer('candidate_automation_id')
+      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .notNull(),
+    executionJobId: integer('execution_job_id').references(
+      () => automationExecutionJobs.id,
+      { onDelete: 'restrict' },
+    ),
+    status: automationRepairAttemptStatusEnum('status')
+      .notNull()
+      .default('generated'),
+    explanation: text('explanation').notNull(),
+    sourceDiff: text('source_diff').notNull(),
+    changeFingerprint: varchar('change_fingerprint', { length: 64 }).notNull(),
+    evidenceSnapshot: jsonb('evidence_snapshot')
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    provider: aiProviderEnum('provider').notNull(),
+    model: varchar('model', { length: 255 }).notNull(),
+    promptVersion: varchar('prompt_version', { length: 100 }).notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueAttempt: uniqueIndex('automation_repair_attempts_unique_attempt').on(
+      table.sessionId,
+      table.attemptNumber,
+    ),
+    fingerprintIndex: index('automation_repair_attempts_fingerprint_index').on(
+      table.sessionId,
+      table.changeFingerprint,
+    ),
+  }),
+);
+
 // Test runs
 export const testRuns = pgTable('test_runs', {
   id: serial('id').primaryKey(),
@@ -673,6 +785,7 @@ export const usersRelations = relations(users, ({ many }) => ({
     relationName: 'testAutomationAcceptor',
   }),
   requestedAutomationExecutions: many(automationExecutionJobs),
+  requestedAutomationRepairs: many(automationRepairSessions),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -684,6 +797,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   teams: many(teams),
   environments: many(environments),
   automationExecutionJobs: many(automationExecutionJobs),
+  automationRepairSessions: many(automationRepairSessions),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
@@ -874,6 +988,8 @@ export const testAutomationsRelations = relations(
       relationName: 'testAutomationAcceptor',
     }),
     executionJobs: many(automationExecutionJobs),
+    repairSessions: many(automationRepairSessions),
+    repairCandidates: many(automationRepairAttempts),
   }),
 );
 
@@ -897,6 +1013,8 @@ export const automationExecutionJobsRelations = relations(
       references: [users.id],
     }),
     artifacts: many(automationExecutionArtifacts),
+    repairSourceSessions: many(automationRepairSessions),
+    repairAttempts: many(automationRepairAttempts),
   }),
 );
 
@@ -905,6 +1023,47 @@ export const automationExecutionArtifactsRelations = relations(
   ({ one }) => ({
     job: one(automationExecutionJobs, {
       fields: [automationExecutionArtifacts.jobId],
+      references: [automationExecutionJobs.id],
+    }),
+  }),
+);
+
+export const automationRepairSessionsRelations = relations(
+  automationRepairSessions,
+  ({ one, many }) => ({
+    project: one(projects, {
+      fields: [automationRepairSessions.projectId],
+      references: [projects.id],
+    }),
+    sourceExecution: one(automationExecutionJobs, {
+      fields: [automationRepairSessions.sourceExecutionId],
+      references: [automationExecutionJobs.id],
+    }),
+    sourceAutomation: one(testAutomations, {
+      fields: [automationRepairSessions.sourceAutomationId],
+      references: [testAutomations.id],
+    }),
+    requestedBy: one(users, {
+      fields: [automationRepairSessions.requestedById],
+      references: [users.id],
+    }),
+    attempts: many(automationRepairAttempts),
+  }),
+);
+
+export const automationRepairAttemptsRelations = relations(
+  automationRepairAttempts,
+  ({ one }) => ({
+    session: one(automationRepairSessions, {
+      fields: [automationRepairAttempts.sessionId],
+      references: [automationRepairSessions.id],
+    }),
+    candidateAutomation: one(testAutomations, {
+      fields: [automationRepairAttempts.candidateAutomationId],
+      references: [testAutomations.id],
+    }),
+    executionJob: one(automationExecutionJobs, {
+      fields: [automationRepairAttempts.executionJobId],
       references: [automationExecutionJobs.id],
     }),
   }),
