@@ -1,4 +1,6 @@
 import type { Client } from 'minio';
+import { serverEnv } from '../../env';
+import { publicizeStorageUrl } from '../files/public-url';
 import { ConflictError, NotFoundError } from '@probe/shared/errors/app-error';
 import type { QueueAutomationExecutionInput } from '@probe/shared/schemas/automation-executions';
 import type { AutomationExecutionRepository } from '../../repositories/automation-executions/repository';
@@ -117,10 +119,9 @@ export function createAutomationExecutionService(
         throw new NotFoundError('Artifact not found or expired');
       }
       return {
-        url: await storage.presignedGetObject(
-          bucketName,
-          artifact.objectName,
-          300,
+        url: publicizeStorageUrl(
+          await storage.presignedGetObject(bucketName, artifact.objectName, 300),
+          serverEnv.MINIO_PUBLIC_URL,
         ),
         expiresInSeconds: 300,
       };

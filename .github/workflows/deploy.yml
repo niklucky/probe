@@ -1,0 +1,112 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.38
+      - run: bun install --frozen-lockfile
+      - run: bun run check-types
+      - run: bun test
+      - run: bun run build
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            file: apps/api/Dockerfile
+            context: .
+          - name: runner
+            file: apps/runner/Dockerfile
+            context: .
+          - name: execution
+            file: apps/runner/execution-image/Dockerfile
+            context: apps/runner/execution-image
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+      - name: Prepare release files
+        env:
+          PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+        run: |
+          printf '%s\n' "$PRODUCTION_ENV_FILE" > "$RUNNER_TEMP/probe.env"
+          chmod 0600 "$RUNNER_TEMP/probe.env"
+          {
+            echo "API_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-api:${{ github.sha }}"
+            echo "RUNNER_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-runner:${{ github.sha }}"
+            echo "EXECUTION_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-execution:${{ github.sha }}"
+          } > "$RUNNER_TEMP/release.env"
+      - name: Upload configuration
+        env:
+          TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+        run: |
+          ssh "$TARGET" 'mkdir -p /opt/probe/deploy'
+          scp compose.prod.yml "${TARGET}:/opt/probe/compose.prod.yml"
+          scp deploy/deploy.sh deploy/backup.sh "${TARGET}:/opt/probe/deploy/"
+          scp "$RUNNER_TEMP/probe.env" "${TARGET}:/opt/probe/.env.next"
+          scp "$RUNNER_TEMP/release.env" "${TARGET}:/opt/probe/release.env"
+      - name: Authenticate registry and deploy
+        env:
+          TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh "$TARGET" "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          ssh "$TARGET" 'cd /opt/probe && install -m 0600 .env.next .env && rm .env.next && chmod 0750 deploy/deploy.sh deploy/backup.sh && deploy/deploy.sh release.env'
+      - name: Verify production
+        env:
+          TARGET: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+        run: ssh "$TARGET" 'curl --fail --show-error --retry 12 --retry-all-errors --retry-delay 5 http://127.0.0.1:11010/health'

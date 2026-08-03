@@ -98,7 +98,7 @@ function bindRepository(database: Database) {
         .where(
           and(
             eq(automationRepairSessions.status, 'running'),
-            sql`${automationRepairSessions.createdAt} + (${automationRepairSessions.maxDurationMs} * interval '1 millisecond') <= ${now}`,
+            sql`${automationRepairSessions.createdAt} + (${automationRepairSessions.maxDurationMs} * interval '1 millisecond') <= ${now.toISOString()}`,
             sql`not exists (
               select 1 from ${automationRepairAttempts}
               where ${automationRepairAttempts.sessionId} = ${automationRepairSessions.id}

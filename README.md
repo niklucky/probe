@@ -6,6 +6,10 @@ Accepted Playwright automations can run asynchronously in the separate isolated
 worker. See [the runner guide](docs/automation-runner.md) for local setup,
 security boundaries, recovery behavior, and artifact retention.
 
+Production is deployed as immutable containers through GitHub Actions. See
+[the production deployment guide](deploy/README.md) for architecture,
+provisioning, secrets, deployment, backup, and rollback procedures.
+
 ## Features
 
 ### Current Implementation (MVP)
@@ -48,10 +52,11 @@ Unlike traditional test management tools, Probe implements a robust versioning s
 probe/
 ├── apps/
 │   ├── api/              # Hono + tRPC backend
+│   ├── runner/           # Isolated asynchronous Playwright worker
 │   └── web/              # React + Vite frontend
 ├── packages/
 │   ├── db/               # Drizzle ORM schemas & migrations
-│   ├── trpc/             # tRPC router & shared types
+│   ├── server/           # Application services and tRPC router
 │   ├── shared/           # Shared TypeScript types
 │   └── typescript-config/# Shared TS configs
 ├── compose.local.yml     # Local Postgres + MinIO

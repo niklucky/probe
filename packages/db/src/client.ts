@@ -22,9 +22,11 @@ export const db = drizzle(queryClient, { schema });
 // Run migrations
 export async function runMigrations() {
   console.log("Running database migrations...");
-  console.log(__dirname + "/migrations");
+  const migrationsFolder =
+    process.env.DATABASE_MIGRATIONS_PATH || __dirname + "/migrations";
+  console.log(migrationsFolder);
   await migrate(drizzle(migrationClient), {
-    migrationsFolder: __dirname + "/migrations",
+    migrationsFolder,
   });
   console.log("Migrations completed successfully");
   await migrationClient.end();
