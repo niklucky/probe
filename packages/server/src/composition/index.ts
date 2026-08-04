@@ -21,6 +21,7 @@ import { createAuthorizationRepository } from '../repositories/authorization/rep
 import { createAuthorizationService } from '../services/authorization/service';
 import { createEnvironmentRepository } from '../repositories/environments/repository';
 import { createEnvironmentService } from '../services/environments/service';
+import { createEnvironmentVariableCipher } from '../services/environments/encryption';
 import { createAiConnectionRepository } from '../repositories/ai-connections/repository';
 import { createAiConnectionService } from '../services/ai-connections/service';
 import { createCredentialCipher } from '../services/ai-connections/encryption';
@@ -57,6 +58,7 @@ export function createServices() {
   const environments = createEnvironmentService(
     createEnvironmentRepository(),
     authorization,
+    createEnvironmentVariableCipher(),
   );
   const runnerDefaults = {
     version: serverEnv.RUNNER_VERSION,

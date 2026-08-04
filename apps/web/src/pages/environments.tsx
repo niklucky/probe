@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, Edit, Plus, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  CheckCircle,
+  Edit,
+  KeyRound,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +41,13 @@ const emptyForm = {
   isDefault: false,
 };
 
+const emptyVariableForm = {
+  key: '',
+  value: '',
+  isSecret: false,
+  description: '',
+};
+
 export function EnvironmentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
@@ -41,11 +55,29 @@ export function EnvironmentsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [variablesEnvironment, setVariablesEnvironment] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [editingVariableId, setEditingVariableId] = useState<number | null>(
+    null,
+  );
+  const [editingVariableWasSecret, setEditingVariableWasSecret] =
+    useState(false);
+  const [variableForm, setVariableForm] = useState(emptyVariableForm);
+  const [variableError, setVariableError] = useState('');
   const input = { projectId: id, productId };
 
   const { data: project } = trpc.projects.get.useQuery({ id });
   const { data: products } = trpc.products.list.useQuery({ projectId: id });
   const { data: environments } = trpc.environments.list.useQuery(input);
+  const variablesInput = {
+    environmentId: variablesEnvironment?.id ?? 0,
+  };
+  const { data: variables = [] } = trpc.environments.listVariables.useQuery(
+    variablesInput,
+    { enabled: Boolean(variablesEnvironment) },
+  );
   const utils = trpc.useContext();
 
   const refresh = () => utils.environments.list.invalidate(input);
@@ -66,6 +98,30 @@ export function EnvironmentsPage() {
   const deleteEnvironment = trpc.environments.delete.useMutation({
     onSuccess: refresh,
   });
+  const refreshVariables = () =>
+    utils.environments.listVariables.invalidate(variablesInput);
+  const createVariable = trpc.environments.createVariable.useMutation({
+    onSuccess: () => {
+      refreshVariables();
+      setVariableForm(emptyVariableForm);
+      setVariableError('');
+    },
+    onError: (error) => setVariableError(error.message),
+  });
+  const updateVariable = trpc.environments.updateVariable.useMutation({
+    onSuccess: () => {
+      refreshVariables();
+      setEditingVariableId(null);
+      setEditingVariableWasSecret(false);
+      setVariableForm(emptyVariableForm);
+      setVariableError('');
+    },
+    onError: (error) => setVariableError(error.message),
+  });
+  const deleteVariable = trpc.environments.deleteVariable.useMutation({
+    onSuccess: refreshVariables,
+    onError: (error) => setVariableError(error.message),
+  });
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -78,6 +134,28 @@ export function EnvironmentsPage() {
         ...form,
       });
     }
+  };
+
+  const submitVariable = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!variablesEnvironment) return;
+    if (editingVariableId) {
+      updateVariable.mutate({
+        id: editingVariableId,
+        key: variableForm.key,
+        isSecret: variableForm.isSecret,
+        description: variableForm.description || null,
+        ...(!editingVariableWasSecret || variableForm.value !== ''
+          ? { value: variableForm.value }
+          : {}),
+      });
+      return;
+    }
+    createVariable.mutate({
+      environmentId: variablesEnvironment.id,
+      ...variableForm,
+      description: variableForm.description || undefined,
+    });
   };
 
   const formFields = (
@@ -148,8 +226,7 @@ export function EnvironmentsPage() {
           </div>
           <h1 className="text-3xl font-bold">Environments</h1>
           <p className="text-muted-foreground">
-            Base URLs only. Store test credentials in a secret store, not test
-            cases or environment records.
+            Base URLs and encrypted variables for reusable test placeholders.
           </p>
         </div>
         <div className="flex gap-2">
@@ -257,14 +334,32 @@ export function EnvironmentsPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <a
-                className="text-sm text-primary hover:underline"
-                href={environment.baseUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {environment.baseUrl}
-              </a>
+              <div className="flex items-center justify-between gap-3">
+                <a
+                  className="truncate text-sm text-primary hover:underline"
+                  href={environment.baseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {environment.baseUrl}
+                </a>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setVariablesEnvironment({
+                      id: environment.id,
+                      name: environment.name,
+                    });
+                    setEditingVariableId(null);
+                    setVariableForm(emptyVariableForm);
+                    setVariableError('');
+                  }}
+                >
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  Variables
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -283,6 +378,187 @@ export function EnvironmentsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={variablesEnvironment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setVariablesEnvironment(null);
+            setEditingVariableId(null);
+            setEditingVariableWasSecret(false);
+            setVariableForm(emptyVariableForm);
+            setVariableError('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{variablesEnvironment?.name} variables</DialogTitle>
+            <DialogDescription>
+              Reference values in test text as{' '}
+              <code>{'{{variable_name}}'}</code>. All values are encrypted at
+              rest; secret values cannot be read back.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-4" onSubmit={submitVariable}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="variable-key">Key</Label>
+                <Input
+                  id="variable-key"
+                  value={variableForm.key}
+                  onChange={(event) =>
+                    setVariableForm({
+                      ...variableForm,
+                      key: event.target.value,
+                    })
+                  }
+                  placeholder="username"
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="variable-value">Value</Label>
+                <Input
+                  id="variable-value"
+                  type={variableForm.isSecret ? 'password' : 'text'}
+                  value={variableForm.value}
+                  onChange={(event) =>
+                    setVariableForm({
+                      ...variableForm,
+                      value: event.target.value,
+                    })
+                  }
+                  placeholder={
+                    editingVariableWasSecret
+                      ? 'Leave blank to keep the existing value'
+                      : 'Value'
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="variable-description">Description</Label>
+              <Input
+                id="variable-description"
+                value={variableForm.description}
+                onChange={(event) =>
+                  setVariableForm({
+                    ...variableForm,
+                    description: event.target.value,
+                  })
+                }
+                placeholder="QA account username"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="variable-secret"
+                  checked={variableForm.isSecret}
+                  onCheckedChange={(checked) =>
+                    setVariableForm({
+                      ...variableForm,
+                      isSecret: checked === true,
+                    })
+                  }
+                />
+                <Label htmlFor="variable-secret">Secret value</Label>
+              </div>
+              <div className="flex gap-2">
+                {editingVariableId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setEditingVariableId(null);
+                      setEditingVariableWasSecret(false);
+                      setVariableForm(emptyVariableForm);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  disabled={
+                    createVariable.isPending || updateVariable.isPending
+                  }
+                >
+                  {editingVariableId ? 'Save variable' : 'Add variable'}
+                </Button>
+              </div>
+            </div>
+          </form>
+
+          {variableError && (
+            <p className="text-sm text-destructive">{variableError}</p>
+          )}
+
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {variables.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No variables configured yet.
+              </p>
+            )}
+            {variables.map((variable) => (
+              <div
+                key={variable.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <code className="font-medium">{`{{${variable.key}}}`}</code>
+                    {variable.isSecret && (
+                      <Badge variant="secondary">Secret</Badge>
+                    )}
+                    {variable.valueStatus === 'unreadable' && (
+                      <Badge variant="destructive">Unavailable</Badge>
+                    )}
+                  </div>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {variable.isSecret
+                      ? '••••••••'
+                      : variable.valueStatus === 'unreadable'
+                        ? 'Value cannot be decrypted'
+                        : variable.value}
+                    {variable.description ? ` · ${variable.description}` : ''}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEditingVariableId(variable.id);
+                      setEditingVariableWasSecret(variable.isSecret);
+                      setVariableForm({
+                        key: variable.key,
+                        value: variable.value ?? '',
+                        isSecret: variable.isSecret,
+                        description: variable.description ?? '',
+                      });
+                      setVariableError('');
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deleteVariable.mutate({ id: variable.id })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
