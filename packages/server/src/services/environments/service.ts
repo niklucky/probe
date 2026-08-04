@@ -1,4 +1,8 @@
-import { AppError, ConflictError } from '@probe/shared/errors/app-error';
+import {
+  AppError,
+  ConflictError,
+  InternalServerError,
+} from '@probe/shared/errors/app-error';
 import type {
   CreateEnvironmentInput,
   CreateEnvironmentVariableInput,
@@ -39,13 +43,57 @@ export function createEnvironmentService(
     },
   >(variable: T) {
     const { encryptedValue, ...safe } = variable;
-    return {
-      ...safe,
-      value: variable.isSecret
-        ? null
-        : cipher.decrypt(encryptedValue, variable.environmentId, variable.key),
-      hasValue: true as const,
-    };
+    if (variable.isSecret) {
+      return {
+        ...safe,
+        value: null,
+        valueStatus: 'secret' as const,
+      };
+    }
+    try {
+      return {
+        ...safe,
+        value: cipher.decrypt(
+          encryptedValue,
+          variable.environmentId,
+          variable.key,
+        ),
+        valueStatus: 'available' as const,
+      };
+    } catch (error) {
+      if (!(error instanceof InternalServerError)) throw error;
+      return {
+        ...safe,
+        value: null,
+        valueStatus: 'unreadable' as const,
+      };
+    }
+  }
+
+  function variableKeyConflict(key: string) {
+    return new ConflictError(`Environment variable "${key}" already exists`);
+  }
+
+  function isUniqueViolation(error: unknown) {
+    let current = error;
+    for (let depth = 0; depth < 4; depth += 1) {
+      if (!current || typeof current !== 'object') return false;
+      if ('code' in current && current.code === '23505') return true;
+      current = 'cause' in current ? current.cause : undefined;
+    }
+    return false;
+  }
+
+  async function mapVariableKeyConflict<T>(
+    key: string,
+    operation: () => Promise<T>,
+  ) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw variableKeyConflict(key);
+      throw error;
+    }
   }
 
   async function requireUniqueVariableKey(
@@ -55,7 +103,7 @@ export function createEnvironmentService(
   ) {
     const existing = await repository.findVariableByKey(environmentId, key);
     if (existing && existing.id !== excludingId) {
-      throw new ConflictError(`Environment variable "${key}" already exists`);
+      throw variableKeyConflict(key);
     }
   }
 
@@ -162,18 +210,20 @@ export function createEnvironmentService(
         throw new AppError('NOT_FOUND', 'Environment not found');
       }
       await requireUniqueVariableKey(input.environmentId, input.key);
-      const variable = await repository.createVariable({
-        environmentId: input.environmentId,
-        key: input.key,
-        encryptedValue: cipher.encrypt(
-          input.value,
-          input.environmentId,
-          input.key,
-        ),
-        isSecret: input.isSecret,
-        description: input.description || null,
-        createdById: userId,
-      });
+      const variable = await mapVariableKeyConflict(input.key, () =>
+        repository.createVariable({
+          environmentId: input.environmentId,
+          key: input.key,
+          encryptedValue: cipher.encrypt(
+            input.value,
+            input.environmentId,
+            input.key,
+          ),
+          isSecret: input.isSecret,
+          description: input.description || null,
+          createdById: userId,
+        }),
+      );
       return publicVariable(variable!);
     },
 
@@ -183,7 +233,7 @@ export function createEnvironmentService(
     ) {
       const current = await repository.findVariable(input.id);
       if (!current) {
-        throw new AppError('NOT_FOUND', 'Environment variable not found');
+        throw new AppError('NOT_FOUND', 'Resource not found');
       }
       await authorization.require(
         userId,
@@ -224,16 +274,18 @@ export function createEnvironmentService(
           nextKey,
         );
       }
-      const variable = await repository.updateVariable(input.id, {
-        ...(input.key !== undefined ? { key: input.key } : {}),
-        ...(encryptedValue !== undefined ? { encryptedValue } : {}),
-        ...(input.isSecret !== undefined ? { isSecret: input.isSecret } : {}),
-        ...(input.description !== undefined
-          ? { description: input.description || null }
-          : {}),
-      });
+      const variable = await mapVariableKeyConflict(nextKey, () =>
+        repository.updateVariable(input.id, {
+          ...(input.key !== undefined ? { key: input.key } : {}),
+          ...(encryptedValue !== undefined ? { encryptedValue } : {}),
+          ...(input.isSecret !== undefined ? { isSecret: input.isSecret } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description || null }
+            : {}),
+        }),
+      );
       if (!variable) {
-        throw new AppError('NOT_FOUND', 'Environment variable not found');
+        throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return publicVariable(variable);
     },
@@ -241,7 +293,7 @@ export function createEnvironmentService(
     async deleteVariable(id: number, userId: number) {
       const variable = await repository.findVariable(id);
       if (!variable) {
-        throw new AppError('NOT_FOUND', 'Environment variable not found');
+        throw new AppError('NOT_FOUND', 'Resource not found');
       }
       await authorization.require(
         userId,
@@ -249,7 +301,7 @@ export function createEnvironmentService(
         'author',
       );
       if (!(await repository.deleteVariable(id))) {
-        throw new AppError('NOT_FOUND', 'Environment variable not found');
+        throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return { success: true as const };
     },

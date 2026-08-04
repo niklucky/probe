@@ -87,7 +87,7 @@ export const environmentVariableSchema = createSelectSchema(
   })
   .extend({
     value: z.string().nullable(),
-    hasValue: z.literal(true),
+    valueStatus: z.enum(['available', 'secret', 'unreadable']),
   });
 
 export const listEnvironmentVariablesInputSchema = z.object({

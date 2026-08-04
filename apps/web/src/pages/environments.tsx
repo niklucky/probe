@@ -515,9 +515,16 @@ export function EnvironmentsPage() {
                     {variable.isSecret && (
                       <Badge variant="secondary">Secret</Badge>
                     )}
+                    {variable.valueStatus === 'unreadable' && (
+                      <Badge variant="destructive">Unavailable</Badge>
+                    )}
                   </div>
                   <p className="truncate text-sm text-muted-foreground">
-                    {variable.isSecret ? '••••••••' : variable.value}
+                    {variable.isSecret
+                      ? '••••••••'
+                      : variable.valueStatus === 'unreadable'
+                        ? 'Value cannot be decrypted'
+                        : variable.value}
                     {variable.description ? ` · ${variable.description}` : ''}
                   </p>
                 </div>
