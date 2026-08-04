@@ -64,6 +64,7 @@ pids/
 
 # React Router
 .react-router/
+.env.production
 
 # Database
 *.db
