@@ -196,6 +196,35 @@ export const environments = pgTable(
   }),
 );
 
+// Values are always encrypted, including variables not marked as secrets. The
+// isSecret flag controls disclosure and runtime artifact policy, not storage.
+export const environmentVariables = pgTable(
+  'environment_variables',
+  {
+    id: serial('id').primaryKey(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'cascade' })
+      .notNull(),
+    key: varchar('key', { length: 128 }).notNull(),
+    encryptedValue: text('encrypted_value').notNull(),
+    isSecret: boolean('is_secret').notNull().default(false),
+    description: varchar('description', { length: 500 }),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    environmentIndex: index('environment_variables_environment_index').on(
+      table.environmentId,
+    ),
+    environmentKeyUnique: uniqueIndex(
+      'environment_variables_environment_key_unique',
+    ).on(table.environmentId, table.key),
+  }),
+);
+
 // AI credentials and custom headers are stored only in encryptedConfig. Never
 // select this table directly for API responses; the server repository redacts it.
 export const aiConnections = pgTable(
@@ -826,6 +855,21 @@ export const environmentsRelations = relations(
     }),
     testAutomations: many(testAutomations),
     automationExecutionJobs: many(automationExecutionJobs),
+    variables: many(environmentVariables),
+  }),
+);
+
+export const environmentVariablesRelations = relations(
+  environmentVariables,
+  ({ one }) => ({
+    environment: one(environments, {
+      fields: [environmentVariables.environmentId],
+      references: [environments.id],
+    }),
+    createdBy: one(users, {
+      fields: [environmentVariables.createdById],
+      references: [users.id],
+    }),
   }),
 );
 

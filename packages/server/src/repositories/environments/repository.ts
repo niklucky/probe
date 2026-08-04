@@ -1,4 +1,12 @@
-import { and, db, environments, eq, isNull, products } from '@probe/db';
+import {
+  and,
+  db,
+  environmentVariables,
+  environments,
+  eq,
+  isNull,
+  products,
+} from '@probe/db';
 
 type Database = typeof db;
 
@@ -25,6 +33,50 @@ function bindEnvironmentRepository(database: Database) {
       return database.query.environments.findFirst({
         where: eq(environments.id, id),
       });
+    },
+    listVariables(environmentId: number) {
+      return database.query.environmentVariables.findMany({
+        where: eq(environmentVariables.environmentId, environmentId),
+        orderBy: (table, { asc }) => [asc(table.key)],
+      });
+    },
+    findVariable(id: number) {
+      return database.query.environmentVariables.findFirst({
+        where: eq(environmentVariables.id, id),
+      });
+    },
+    findVariableByKey(environmentId: number, key: string) {
+      return database.query.environmentVariables.findFirst({
+        where: and(
+          eq(environmentVariables.environmentId, environmentId),
+          eq(environmentVariables.key, key),
+        ),
+      });
+    },
+    async createVariable(values: typeof environmentVariables.$inferInsert) {
+      const [variable] = await database
+        .insert(environmentVariables)
+        .values(values)
+        .returning();
+      return variable;
+    },
+    async updateVariable(
+      id: number,
+      values: Partial<typeof environmentVariables.$inferInsert>,
+    ) {
+      const [variable] = await database
+        .update(environmentVariables)
+        .set({ ...values, updatedAt: new Date() })
+        .where(eq(environmentVariables.id, id))
+        .returning();
+      return variable;
+    },
+    async deleteVariable(id: number) {
+      const [variable] = await database
+        .delete(environmentVariables)
+        .where(eq(environmentVariables.id, id))
+        .returning();
+      return variable;
     },
     findProduct(id: number) {
       return database.query.products.findFirst({

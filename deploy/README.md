@@ -67,8 +67,9 @@ It does not install or configure Nginx.
 
 `PRODUCTION_ENV_FILE` must use URL-safe PostgreSQL credentials because the same
 password appears in `DATABASE_URL`. `PUBLIC_BASE_URL` is the externally visible
-HTTPS origin configured by Nginx. Keep `AI_MASTER_KEY` permanently stable;
-rotating it makes stored AI credentials unreadable.
+HTTPS origin configured by Nginx. Keep `AI_MASTER_KEY` and
+`ENVIRONMENT_VARIABLES_MASTER_KEY` permanently stable; rotating either key
+makes the values encrypted with it unreadable.
 
 ## Deployment and rollback
 
