@@ -5,10 +5,14 @@ import {
   artifactMetadata,
   cleanupAbandonedExecution,
   executeInContainer,
+  extractRuntimeEnvironmentReferences,
   listArtifactFiles,
-  selectRuntimeSecrets,
   stat,
 } from './executor';
+import {
+  resolveRuntimeEnvironment,
+  RuntimeEnvironmentError,
+} from './environment-variables';
 import {
   createRunnerRepository,
   isRunnableExecutionSnapshot,
@@ -79,20 +83,48 @@ async function runClaimedJob(jobId: number) {
   }
   if (!(await repository.start(jobId, runnerConfig.RUNNER_ID))) return;
 
-  const result = await executeInContainer(
-    payload,
-    selectRuntimeSecrets(
-      payload.automation.source,
-      runnerConfig.RUNNER_TEST_SECRETS_JSON,
-    ),
-    {
-      heartbeat: async () =>
-        Boolean(
-          (await repository.heartbeat(jobId, runnerConfig.RUNNER_ID))
-            ?.cancellationRequestedAt,
-        ),
-    },
+  const references = extractRuntimeEnvironmentReferences(
+    payload.automation.source,
   );
+  let runtimeEnvironment: ReturnType<typeof resolveRuntimeEnvironment>;
+  try {
+    const variables = await repository.listEnvironmentVariables(
+      payload.environmentId,
+      references,
+    );
+    runtimeEnvironment = resolveRuntimeEnvironment(
+      references,
+      variables,
+      payload.environmentId,
+      runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
+    );
+  } catch (error) {
+    const message =
+      error instanceof RuntimeEnvironmentError
+        ? error.message
+        : 'Execution environment variables could not be loaded';
+    await repository.finish(jobId, runnerConfig.RUNNER_ID, {
+      status: 'infrastructure_error',
+      errorCode:
+        error instanceof RuntimeEnvironmentError
+          ? error.code
+          : 'ENVIRONMENT_VARIABLE_LOAD_FAILED',
+      errorMessage: message,
+      structuredLogs: [
+        { at: new Date().toISOString(), level: 'error', message },
+      ],
+    });
+    return;
+  }
+
+  const result = await executeInContainer(payload, runtimeEnvironment.values, {
+    hasInjectedSecrets: runtimeEnvironment.secretNames.length > 0,
+    heartbeat: async () =>
+      Boolean(
+        (await repository.heartbeat(jobId, runnerConfig.RUNNER_ID))
+          ?.cancellationRequestedAt,
+      ),
+  });
   try {
     await uploadArtifacts(
       jobId,

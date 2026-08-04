@@ -5,6 +5,7 @@ import {
   automationRepairSessions,
   db,
   eq,
+  environmentVariables,
   environments,
   products,
   projects,
@@ -130,6 +131,43 @@ integrationTest(
       });
 
       const repository = createRunnerRepository();
+      await db.insert(environmentVariables).values([
+        {
+          environmentId: environment!.id,
+          key: 'username',
+          encryptedValue: 'encrypted-username',
+          isSecret: false,
+          createdById: user!.id,
+        },
+        {
+          environmentId: environment!.id,
+          key: 'password',
+          encryptedValue: 'encrypted-password',
+          isSecret: true,
+          createdById: user!.id,
+        },
+        {
+          environmentId: environment!.id,
+          key: 'unrelated',
+          encryptedValue: 'must-not-be-loaded',
+          isSecret: true,
+          createdById: user!.id,
+        },
+      ]);
+      const selectedVariables = await repository.listEnvironmentVariables(
+        environment!.id,
+        ['username', 'password'],
+      );
+      expect(selectedVariables.map(({ key }) => key).sort()).toEqual([
+        'password',
+        'username',
+      ]);
+      expect(
+        selectedVariables.some(({ encryptedValue }) =>
+          encryptedValue.includes('must-not-be-loaded'),
+        ),
+      ).toBe(false);
+
       const claims = await Promise.all([
         repository.claim(`worker-a-${suffix}`),
         repository.claim(`worker-b-${suffix}`),

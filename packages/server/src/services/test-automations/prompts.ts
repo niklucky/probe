@@ -1,4 +1,4 @@
-export const TEST_AUTOMATION_PROMPT_VERSION = 'playwright-typescript-v1';
+export const TEST_AUTOMATION_PROMPT_VERSION = 'playwright-typescript-v2';
 
 export const automationSourceJsonSchema = {
   type: 'object',
@@ -14,7 +14,7 @@ export const automationSystemPrompt = [
   'Return one complete Playwright TypeScript test file in the source field.',
   'Use Playwright-native expect assertions and prefer getByRole, getByLabel, getByPlaceholder, getByText, or getByTestId locators.',
   'Use the provided base URL. Never embed passwords, tokens, cookies, API keys, or credentials.',
-  'Represent every required secret as a descriptive environment variable such as process.env.TEST_USER_PASSWORD.',
+  'For every manual-test placeholder, use exactly the supplied deterministic process.env reference. Never copy a variable value into source.',
   'Do not wrap the source in Markdown fences.',
 ].join(' ');
 
@@ -27,9 +27,18 @@ export function automationPrompt(
     expectedResult: string;
   },
   environment: { name: string; type: string; baseUrl: string },
+  variables: Array<{
+    key: string;
+    description: string | null;
+    isSecret: boolean;
+  }>,
 ) {
   return [
-    `Target environment:\n${JSON.stringify(environment)}`,
+    `Target environment:\n${JSON.stringify({ name: environment.name, type: environment.type, baseUrl: environment.baseUrl })}`,
+    `Referenced environment variable metadata (values are intentionally omitted):\n${JSON.stringify(variables)}`,
+    `Required placeholder mappings:\n${variables
+      .map(({ key }) => `{{${key}}} => process.env.${key}`)
+      .join('\n')}`,
     `Canonical accepted manual test specification:\n${JSON.stringify(spec)}`,
     'Generate deterministic, readable automation for only this specification.',
   ].join('\n\n');

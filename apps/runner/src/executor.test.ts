@@ -3,8 +3,8 @@ import {
   artifactMetadata,
   buildDockerArgs,
   classifyExecutionStatus,
+  extractRuntimeEnvironmentReferences,
   redactSecrets,
-  selectRuntimeSecrets,
   type ExecutionPayload,
 } from './executor';
 
@@ -70,22 +70,17 @@ describe('isolated execution command', () => {
     expect(output).not.toContain(secretValue);
     expect(output).not.toContain(bearerValue);
     expect(output).toContain('[REDACTED]');
+    expect(redactSecrets('value=qa', { username: 'qa' })).toBe(
+      'value=[REDACTED]',
+    );
   });
 
-  test('only injects secrets explicitly referenced by the accepted source', () => {
+  test('extracts only environment values explicitly referenced by accepted source', () => {
     expect(
-      selectRuntimeSecrets(
-        "console.log(process.env.TEST_USER); use(process.env['TEST_PASSWORD'])",
-        {
-          TEST_USER: 'qa@example.test',
-          TEST_PASSWORD: 'private',
-          OTHER_PROJECT_TOKEN: 'must-not-be-injected',
-        },
+      extractRuntimeEnvironmentReferences(
+        "console.log(process.env.username); use(process.env['password']); page.goto(process.env.BASE_URL!)",
       ),
-    ).toEqual({
-      TEST_PASSWORD: 'private',
-      TEST_USER: 'qa@example.test',
-    });
+    ).toEqual(['password', 'username']);
   });
 
   test('rejects unsafe secret environment variable names', () => {
@@ -93,7 +88,7 @@ describe('isolated execution command', () => {
       buildDockerArgs(payload, '/tmp/source.ts', '/tmp/artifacts', {
         'BAD-NAME': 'secret',
       }),
-    ).toThrow('Invalid test secret environment variable');
+    ).toThrow('Invalid test environment variable');
   });
 
   test('refuses Docker host, default bridge, and unconfigured network modes', () => {

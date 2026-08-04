@@ -72,20 +72,15 @@ export function classifyExecutionStatus({
   return exitCode === 0 ? 'passed' : 'failed';
 }
 
-export function selectRuntimeSecrets(
-  source: string,
-  available: Record<string, string>,
-) {
+export function extractRuntimeEnvironmentReferences(source: string) {
   const names = new Set<string>();
   for (const match of source.matchAll(
-    /process\.env(?:\.([A-Z_][A-Z0-9_]*)|\[['"]([A-Z_][A-Z0-9_]*)['"]\])/g,
+    /process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\])/g,
   )) {
     const name = match[1] ?? match[2];
-    if (name && available[name] !== undefined) names.add(name);
+    if (name && name !== 'BASE_URL') names.add(name);
   }
-  return Object.fromEntries(
-    [...names].sort().map((name) => [name, available[name]!]),
-  );
+  return [...names].sort();
 }
 
 export function redactSecrets(value: string, secrets: Record<string, string>) {
@@ -93,7 +88,7 @@ export function redactSecrets(value: string, secrets: Record<string, string>) {
   for (const secret of Object.values(secrets).sort(
     (left, right) => right.length - left.length,
   )) {
-    if (secret.length >= 3)
+    if (secret.length > 0)
       sanitized = sanitized.split(secret).join('[REDACTED]');
   }
   return sanitized
@@ -105,7 +100,8 @@ export function buildDockerArgs(
   payload: ExecutionPayload,
   sourcePath: string,
   artifactDirectory: string,
-  secrets: Record<string, string>,
+  runtimeValues: Record<string, string>,
+  hasInjectedSecrets = Object.keys(runtimeValues).length > 0,
 ) {
   if (
     ['host', 'bridge', 'default', 'none'].includes(
@@ -145,11 +141,11 @@ export function buildDockerArgs(
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',
-    `HAS_TEST_SECRETS=${Object.keys(secrets).length ? 'true' : 'false'}`,
+    `HAS_TEST_SECRETS=${hasInjectedSecrets ? 'true' : 'false'}`,
   ];
-  for (const name of Object.keys(secrets).sort()) {
-    if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
-      throw new Error(`Invalid test secret environment variable: ${name}`);
+  for (const name of Object.keys(runtimeValues).sort()) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`Invalid test environment variable: ${name}`);
     }
     // Docker reads the value from the runner environment. It never appears in
     // process arguments, source, queue records, or result data.
@@ -202,9 +198,10 @@ export async function cleanupAbandonedExecution(jobId: number) {
 
 export async function executeInContainer(
   payload: ExecutionPayload,
-  secrets: Record<string, string>,
+  runtimeValues: Record<string, string>,
   hooks: {
     heartbeat: () => Promise<boolean>;
+    hasInjectedSecrets?: boolean;
   },
 ): Promise<ExecutionResult> {
   const directory = await mkdtemp(join(tmpdir(), `probe-run-${payload.id}-`));
@@ -221,7 +218,8 @@ export async function executeInContainer(
     payload,
     sourcePath,
     artifactDirectory,
-    secrets,
+    runtimeValues,
+    hooks.hasInjectedSecrets,
   );
 
   const startedAt = Date.now();
@@ -241,7 +239,7 @@ export async function executeInContainer(
 
   try {
     child = spawn('docker', args, {
-      env: { ...process.env, ...secrets },
+      env: { ...process.env, ...runtimeValues },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const append = (chunk: Buffer) => {
@@ -309,7 +307,7 @@ export async function executeInContainer(
 
     const sanitized = redactSecrets(
       Buffer.concat(outputChunks.map(({ value }) => value)).toString('utf8'),
-      secrets,
+      runtimeValues,
     );
     const durationMs = Date.now() - startedAt;
     const status = classifyExecutionStatus({
@@ -347,11 +345,11 @@ export async function executeInContainer(
             ? `Artifact output exceeded ${payload.settings.artifactLimitMb} MB`
             : sanitized.slice(-1000) ||
               (infrastructureError
-                ? redactSecrets(infrastructureError.message, secrets)
+                ? redactSecrets(infrastructureError.message, runtimeValues)
                 : undefined),
       logs: outputChunks
         .flatMap(({ at, value }) =>
-          redactSecrets(value.toString('utf8'), secrets)
+          redactSecrets(value.toString('utf8'), runtimeValues)
             .split('\n')
             .filter(Boolean)
             .map((message) => ({ at, level: 'info', message })),
@@ -364,7 +362,7 @@ export async function executeInContainer(
     await stop();
     const message = redactSecrets(
       error instanceof Error ? error.message : 'Runner infrastructure error',
-      secrets,
+      runtimeValues,
     );
     return {
       status: 'infrastructure_error',
