@@ -1,0 +1,13 @@
+.git
+.github
+.turbo
+**/.turbo
+**/dist
+**/node_modules
+node_modules
+.env
+.env.*
+!.env.production.example
+deploy
+docs
+README.md

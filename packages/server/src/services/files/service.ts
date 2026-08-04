@@ -3,6 +3,7 @@ import type { Client } from 'minio';
 import type { createFileRepository } from '../../repositories/files/repository';
 import type { AuthorizationService } from '../authorization/service';
 import { serverEnv } from '../../env';
+import { publicizeStorageUrl } from './public-url';
 
 type Repository = ReturnType<typeof createFileRepository>;
 
@@ -30,10 +31,13 @@ export function createFileService(
       const objectName = `uploads/${Date.now()}-${filename}`;
       try {
         return {
-          uploadUrl: await storage.presignedPutObject(
-            bucketName,
-            objectName,
-            24 * 60 * 60,
+          uploadUrl: publicizeStorageUrl(
+            await storage.presignedPutObject(
+              bucketName,
+              objectName,
+              24 * 60 * 60,
+            ),
+            serverEnv.MINIO_PUBLIC_URL,
           ),
           publicUrl: `${serverEnv.MINIO_PUBLIC_URL}/${bucketName}/${objectName}`,
           objectName,
@@ -66,10 +70,9 @@ export function createFileService(
       const objectName = `${userId}/${Date.now()}_${input.filename}`;
       try {
         return {
-          presignedUrl: await storage.presignedPutObject(
-            bucketName,
-            objectName,
-            300,
+          presignedUrl: publicizeStorageUrl(
+            await storage.presignedPutObject(bucketName, objectName, 300),
+            serverEnv.MINIO_PUBLIC_URL,
           ),
           objectName,
           publicUrl: `${serverEnv.MINIO_PUBLIC_URL}/${bucketName}/${objectName}`,
@@ -122,10 +125,9 @@ export function createFileService(
       if (!file) throw new AppError('NOT_FOUND', 'File not found');
       try {
         return {
-          presignedUrl: await storage.presignedGetObject(
-            bucketName,
-            file.filename,
-            300,
+          presignedUrl: publicizeStorageUrl(
+            await storage.presignedGetObject(bucketName, file.filename, 300),
+            serverEnv.MINIO_PUBLIC_URL,
           ),
         };
       } catch {

@@ -1,8 +1,10 @@
 import { trpcServer } from '@hono/trpc-server';
 import { appRouter, createContext, serverEnv, services } from '@probe/server';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { serveStatic } from 'hono/bun';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { proxy } from 'hono/proxy';
 
 export const app = new Hono();
 
@@ -58,6 +60,44 @@ app.use(
     },
   }),
 );
+
+async function proxyStorage(context: Context) {
+  const maxBodyBytes = 100 * 1024 * 1024;
+  const contentLength = Number(context.req.header('content-length') ?? 0);
+  if (contentLength > maxBodyBytes) {
+    return context.text('Storage request body is too large', 413);
+  }
+  const target = new URL(context.req.url);
+  target.protocol = serverEnv.MINIO_USE_SSL ? 'https:' : 'http:';
+  target.hostname = serverEnv.MINIO_ENDPOINT;
+  target.port = String(serverEnv.MINIO_PORT);
+
+  const headers = new Headers(context.req.raw.headers);
+  headers.delete('host');
+  const method = context.req.method;
+  const body = ['GET', 'HEAD'].includes(method)
+    ? undefined
+    : await context.req.arrayBuffer();
+  if (body && body.byteLength > maxBodyBytes) {
+    return context.text('Storage request body is too large', 413);
+  }
+  return proxy(target, {
+    raw: context.req.raw,
+    headers,
+    body,
+  });
+}
+
+for (const bucket of new Set([
+  serverEnv.MINIO_BUCKET,
+  serverEnv.RUNNER_ARTIFACT_BUCKET,
+])) {
+  app.all(`/${bucket}`, proxyStorage);
+  app.all(`/${bucket}/*`, proxyStorage);
+}
+
+app.use('*', serveStatic({ root: './public' }));
+app.get('*', serveStatic({ path: './public/index.html' }));
 
 app.onError((error, context) => {
   console.error('Error:', error);

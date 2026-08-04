@@ -1,0 +1,132 @@
+name: probe
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:d5daad18926b71c3d663f358af0aea798670cb79fb550c106d19662a9d1627ef
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [app]
+    mem_limit: 384m
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [app]
+    mem_limit: 384m
+
+  minio-setup:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_BUCKET: ${MINIO_BUCKET:?MINIO_BUCKET is required}
+      MINIO_ARTIFACT_BUCKET: ${MINIO_ARTIFACT_BUCKET:?MINIO_ARTIFACT_BUCKET is required}
+      RUNNER_ARTIFACT_RETENTION_DAYS: ${RUNNER_ARTIFACT_RETENTION_DAYS:-14}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set probe http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"
+        mc mb --ignore-existing "probe/$${MINIO_BUCKET}"
+        mc anonymous set download "probe/$${MINIO_BUCKET}"
+        mc mb --ignore-existing "probe/$${MINIO_ARTIFACT_BUCKET}"
+        mc anonymous set none "probe/$${MINIO_ARTIFACT_BUCKET}"
+        mc ilm rule add --expire-days "$${RUNNER_ARTIFACT_RETENTION_DAYS}" --prefix automation-executions/ "probe/$${MINIO_ARTIFACT_BUCKET}" || true
+    networks: [app]
+
+  api:
+    image: ${API_IMAGE:?API_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 11010
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_MIGRATIONS_PATH: /app/dist/migrations
+      FRONTEND_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_BUCKET: ${MINIO_BUCKET:?MINIO_BUCKET is required}
+      MINIO_PUBLIC_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+      RUNNER_VERSION: ${RUNNER_VERSION:-1}
+      RUNNER_CONTAINER_IMAGE: ${EXECUTION_IMAGE:?EXECUTION_IMAGE is required}
+      RUNNER_CPU_LIMIT: ${RUNNER_CPU_LIMIT:-1}
+      RUNNER_MEMORY_MB: ${RUNNER_MEMORY_MB:-768}
+      RUNNER_PROCESS_LIMIT: ${RUNNER_PROCESS_LIMIT:-128}
+      RUNNER_ARTIFACT_LIMIT_MB: ${RUNNER_ARTIFACT_LIMIT_MB:-256}
+      RUNNER_NETWORK_POLICY: probe-runner-egress
+      RUNNER_ARTIFACT_BUCKET: ${MINIO_ARTIFACT_BUCKET:?MINIO_ARTIFACT_BUCKET is required}
+      AI_MASTER_KEY: ${AI_MASTER_KEY:?AI_MASTER_KEY is required}
+      AI_APPROVED_LOCAL_HOSTS: ${AI_APPROVED_LOCAL_HOSTS:-}
+      AI_CONNECTIONS_JSON: ${AI_CONNECTIONS_JSON:-[]}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:11010:11010"
+    networks: [app]
+    mem_limit: 512m
+
+  runner:
+    image: ${RUNNER_IMAGE:?RUNNER_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      TMPDIR: /var/lib/probe/runner
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      RUNNER_ID: production-1
+      RUNNER_POLL_MS: ${RUNNER_POLL_MS:-1000}
+      RUNNER_STALE_SECONDS: ${RUNNER_STALE_SECONDS:-60}
+      RUNNER_ARTIFACT_RETENTION_DAYS: ${RUNNER_ARTIFACT_RETENTION_DAYS:-14}
+      RUNNER_TEST_SECRETS_JSON: ${RUNNER_TEST_SECRETS_JSON:?RUNNER_TEST_SECRETS_JSON is required}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_ARTIFACT_BUCKET: ${MINIO_ARTIFACT_BUCKET:?MINIO_ARTIFACT_BUCKET is required}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RUNNER_WORKSPACE_PATH:-/var/lib/probe/runner}:/var/lib/probe/runner
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app]
+    mem_limit: 320m
+
+networks:
+  app:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
