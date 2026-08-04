@@ -1,11 +1,11 @@
 import { Client } from 'minio';
 import { basename } from 'node:path';
+import { extractAutomationEnvironmentReferences } from '@probe/shared/automation-environment';
 import { runnerConfig } from './config';
 import {
   artifactMetadata,
   cleanupAbandonedExecution,
   executeInContainer,
-  extractRuntimeEnvironmentReferences,
   listArtifactFiles,
   stat,
 } from './executor';
@@ -83,9 +83,11 @@ async function runClaimedJob(jobId: number) {
   }
   if (!(await repository.start(jobId, runnerConfig.RUNNER_ID))) return;
 
-  const references = extractRuntimeEnvironmentReferences(
-    payload.automation.source,
-  );
+  const { references: sourceReferences } =
+    extractAutomationEnvironmentReferences(payload.automation.source);
+  const references = sourceReferences
+    .filter((name) => name !== 'BASE_URL')
+    .sort();
   let runtimeEnvironment: ReturnType<typeof resolveRuntimeEnvironment>;
   try {
     const variables = await repository.listEnvironmentVariables(
@@ -99,6 +101,12 @@ async function runClaimedJob(jobId: number) {
       runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
     );
   } catch (error) {
+    if (!(error instanceof RuntimeEnvironmentError)) {
+      console.error(
+        `Failed to load environment variables for execution ${jobId}`,
+        error,
+      );
+    }
     const message =
       error instanceof RuntimeEnvironmentError
         ? error.message
@@ -117,8 +125,7 @@ async function runClaimedJob(jobId: number) {
     return;
   }
 
-  const result = await executeInContainer(payload, runtimeEnvironment.values, {
-    hasInjectedSecrets: runtimeEnvironment.secretNames.length > 0,
+  const result = await executeInContainer(payload, runtimeEnvironment, {
     heartbeat: async () =>
       Boolean(
         (await repository.heartbeat(jobId, runnerConfig.RUNNER_ID))

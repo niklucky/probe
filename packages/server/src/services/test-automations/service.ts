@@ -4,6 +4,7 @@ import {
   ConflictError,
   NotFoundError,
 } from '@probe/shared/errors/app-error';
+import { extractAutomationEnvironmentReferences } from '@probe/shared/automation-environment';
 import type { GenerateTestAutomationInput } from '@probe/shared/schemas/test-automations';
 import { extractEnvironmentVariableReferencesFromValue } from '@probe/shared/schemas/environments';
 import { format } from 'prettier';
@@ -35,50 +36,6 @@ function cleanGeneratedSource(source: string) {
 export interface AutomationEnvironmentValidation {
   allowed: Iterable<string>;
   required?: Iterable<string>;
-}
-
-export function extractAutomationEnvironmentReferences(source: string) {
-  const sourceFile = ts.createSourceFile(
-    'automation.spec.ts',
-    source,
-    ts.ScriptTarget.ES2022,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const references = new Set<string>();
-  let hasDynamicReference = false;
-  const isProcessEnv = (node: ts.Node) =>
-    ts.isPropertyAccessExpression(node) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === 'process' &&
-    node.name.text === 'env';
-  const visit = (node: ts.Node) => {
-    if (ts.isPropertyAccessExpression(node) && isProcessEnv(node.expression)) {
-      references.add(node.name.text);
-    } else if (
-      ts.isElementAccessExpression(node) &&
-      isProcessEnv(node.expression)
-    ) {
-      const argument = node.argumentExpression;
-      if (argument && ts.isStringLiteralLike(argument)) {
-        references.add(argument.text);
-      } else {
-        hasDynamicReference = true;
-      }
-    } else if (isProcessEnv(node)) {
-      const parent = node.parent;
-      if (!(
-        (ts.isPropertyAccessExpression(parent) ||
-          ts.isElementAccessExpression(parent)) &&
-        parent.expression === node
-      )) {
-        hasDynamicReference = true;
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return { references: [...references], hasDynamicReference };
 }
 
 export async function validateAndFormatAutomationSource(
