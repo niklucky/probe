@@ -5,11 +5,11 @@ describe('public storage URL', () => {
   test('replaces only the origin of a signed MinIO URL', () => {
     const result = publicizeStorageUrl(
       'http://minio:9000/probe-assets/file.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc',
-      'https://signal.hgdev.me',
+      'https://probe.warpunit.com',
     );
 
     expect(result).toBe(
-      'https://signal.hgdev.me/probe-assets/file.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc',
+      'https://probe.warpunit.com/probe-assets/file.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc',
     );
   });
 });

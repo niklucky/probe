@@ -1,6 +1,6 @@
 # Production deployment
 
-Probe runs on `signal.hgdev.me` as a Docker Compose application. GitHub Actions
+Probe runs on `probe.warpunit.com` as a Docker Compose application. GitHub Actions
 builds immutable images for the application server, asynchronous worker, and
 Playwright execution environment, publishes them to GHCR, and deploys the exact
 commit SHA to the VPS.
@@ -59,7 +59,7 @@ It does not install or configure Nginx.
 
 | Secret | Purpose |
 | --- | --- |
-| `VPS_HOST` | `signal.hgdev.me` |
+| `VPS_HOST` | `probe.warpunit.com` |
 | `VPS_USER` | Dedicated `probe` account |
 | `VPS_SSH_PRIVATE_KEY` | Private half of the deployment key |
 | `VPS_KNOWN_HOSTS` | Pinned SSH host-key line |

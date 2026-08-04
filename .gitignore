@@ -86,3 +86,5 @@ $RECYCLE.BIN/
 
 # ESLint
 .eslintcache
+
+.env.production

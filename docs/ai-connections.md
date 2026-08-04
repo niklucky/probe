@@ -8,7 +8,7 @@ usage, capabilities, and latency.
 ## Deployment configuration
 
 Database-backed credentials require `AI_MASTER_KEY`. It must be either a
-base64-encoded 32-byte key or 64 hexadecimal characters. Generate and store it
+base64-encoded 32-byte key or 64 hexadecimal characters. Generate `openssl rand -hex 32` and store it
 in the deployment secret manager; changing it makes existing credentials
 unreadable. The server fails closed when the key is missing, invalid, or cannot
 authenticate stored ciphertext.
