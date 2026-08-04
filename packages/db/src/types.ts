@@ -2,6 +2,7 @@ import type {
   aiConnectionAuditLogs,
   aiConnections,
   environments,
+  environmentVariables,
   files,
   products,
   projects,
@@ -25,6 +26,9 @@ export type Product = typeof products.$inferSelect;
 export type CreateProduct = typeof products.$inferInsert;
 export type Environment = typeof environments.$inferSelect;
 export type CreateEnvironment = typeof environments.$inferInsert;
+export type EnvironmentVariable = typeof environmentVariables.$inferSelect;
+export type CreateEnvironmentVariable =
+  typeof environmentVariables.$inferInsert;
 export type AiConnection = typeof aiConnections.$inferSelect;
 export type CreateAiConnection = typeof aiConnections.$inferInsert;
 export type AiConnectionAuditLog = typeof aiConnectionAuditLogs.$inferSelect;

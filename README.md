@@ -144,7 +144,12 @@ MINIO_SECRET_KEY=signal_password
 MINIO_BUCKET=signal-assets
 MINIO_PUBLIC_URL=http://localhost:11002
 FRONTEND_URL=http://localhost:11020
+ENVIRONMENT_VARIABLES_MASTER_KEY=1111111111111111111111111111111111111111111111111111111111111111
 ```
+
+Keep `ENVIRONMENT_VARIABLES_MASTER_KEY` stable after environment variables are
+created. Use a separately generated 32-byte key in every non-local deployment;
+losing or changing it makes stored variable values unreadable.
 
 ### Legacy-compatible local defaults
 

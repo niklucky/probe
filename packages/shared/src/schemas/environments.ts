@@ -1,5 +1,5 @@
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
-import { environments } from '@probe/db';
+import { environmentVariables, environments } from '@probe/db';
 import { z } from 'zod';
 
 const environmentInsertSchema = createInsertSchema(environments);
@@ -60,9 +60,79 @@ export const environmentIdInputSchema = z.object({
   id: z.number().int().positive(),
 });
 
+export const environmentVariableKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    'Variable key must start with a letter or underscore and contain only letters, numbers, and underscores',
+  );
+
+const environmentVariableValueSchema = z.string().max(50_000);
+
+export const environmentVariableSchema = createSelectSchema(
+  environmentVariables,
+)
+  .pick({
+    id: true,
+    environmentId: true,
+    key: true,
+    isSecret: true,
+    description: true,
+    createdById: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    value: z.string().nullable(),
+    valueStatus: z.enum(['available', 'secret', 'unreadable']),
+  });
+
+export const listEnvironmentVariablesInputSchema = z.object({
+  environmentId: z.number().int().positive(),
+});
+
+export const createEnvironmentVariableInputSchema = z.object({
+  environmentId: z.number().int().positive(),
+  key: environmentVariableKeySchema,
+  value: environmentVariableValueSchema,
+  isSecret: z.boolean().default(false),
+  description: z.string().trim().max(500).optional(),
+});
+
+export const updateEnvironmentVariableInputSchema = z.object({
+  id: z.number().int().positive(),
+  key: environmentVariableKeySchema.optional(),
+  value: environmentVariableValueSchema.optional(),
+  isSecret: z.boolean().optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
+
+export const environmentVariableIdInputSchema = z.object({
+  id: z.number().int().positive(),
+});
+
+const placeholderPattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+export function extractEnvironmentVariableReferences(value: string) {
+  return [
+    ...new Set(
+      [...value.matchAll(placeholderPattern)].map((match) => match[1]!),
+    ),
+  ];
+}
+
 export type CreateEnvironmentInput = z.infer<
   typeof createEnvironmentInputSchema
 >;
 export type UpdateEnvironmentInput = z.infer<
   typeof updateEnvironmentInputSchema
+>;
+export type CreateEnvironmentVariableInput = z.infer<
+  typeof createEnvironmentVariableInputSchema
+>;
+export type UpdateEnvironmentVariableInput = z.infer<
+  typeof updateEnvironmentVariableInputSchema
 >;

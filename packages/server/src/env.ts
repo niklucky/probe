@@ -93,6 +93,7 @@ const rawServerEnvSchema = z.object({
     .default('probe-runner-egress'),
   RUNNER_ARTIFACT_BUCKET: z.string().min(1).default('signal-runner-artifacts'),
   AI_MASTER_KEY: masterKeySchema,
+  ENVIRONMENT_VARIABLES_MASTER_KEY: masterKeySchema,
   AI_APPROVED_LOCAL_HOSTS: z
     .string()
     .default('')
