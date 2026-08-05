@@ -46,7 +46,12 @@ describe('automation execution API service', () => {
     );
 
     await service.queue(
-      { automationId: 7, timeoutSeconds: 120, captureVideo: true },
+      {
+        automationId: 7,
+        timeoutSeconds: 120,
+        captureVideo: true,
+        applyEnvironmentCookies: false,
+      },
       4,
     );
 
@@ -60,6 +65,7 @@ describe('automation execution API service', () => {
         runnerVersion: 'runner-1',
         containerImage: 'probe-playwright-runner:1',
         captureVideo: true,
+        applyEnvironmentCookies: false,
       },
     });
     expect(writes[0]).not.toHaveProperty('source');

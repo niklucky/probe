@@ -120,6 +120,7 @@ integrationTest(
         settings: {
           browser: 'chromium',
           captureVideo: false,
+          applyEnvironmentCookies: true,
           runnerVersion: 'integration-test',
           containerImage: 'integration-test',
           cpuLimit: 1,
@@ -200,6 +201,7 @@ integrationTest(
           settings: {
             browser: 'chromium',
             captureVideo: false,
+            applyEnvironmentCookies: true,
             runnerVersion: 'integration-test',
             containerImage: 'integration-test',
             cpuLimit: 1,

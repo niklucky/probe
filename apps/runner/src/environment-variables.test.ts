@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { createCipheriv } from 'node:crypto';
 import {
+  cookieVariableReferences,
+  resolveRuntimeCookies,
   resolveRuntimeEnvironment,
   RuntimeEnvironmentError,
+  runtimeSensitiveVariableNames,
 } from './environment-variables';
 
 const key = '11'.repeat(32);
@@ -104,5 +107,106 @@ describe('execution environment variables', () => {
     );
     expect(first.values.username).toBe('first');
     expect(second.values.username).toBe('second');
+  });
+});
+
+describe('execution environment cookies', () => {
+  const definition = {
+    name: 'session_id',
+    valueTemplate: 'session={{session_id}}',
+    domain: null,
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax' as const,
+    expiresAt: null,
+  };
+
+  test('resolves templates and safely infers the environment host', () => {
+    expect(cookieVariableReferences([definition])).toEqual(['session_id']);
+    expect(
+      resolveRuntimeCookies([definition], 'https://staging.example.test/app', {
+        session_id: 'private-cookie',
+      }),
+    ).toEqual([
+      {
+        name: 'session_id',
+        value: 'session=private-cookie',
+        domain: 'staging.example.test',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+  });
+
+  test('treats every cookie-referenced variable as sensitive', () => {
+    expect(runtimeSensitiveVariableNames(['password'], ['session_id'])).toEqual(
+      ['password', 'session_id'],
+    );
+  });
+
+  test('allows a related parent domain but rejects unrelated domains', () => {
+    expect(
+      resolveRuntimeCookies(
+        [{ ...definition, domain: 'example.test' }],
+        'https://staging.example.test',
+        { session_id: 'value' },
+      )[0]?.domain,
+    ).toBe('example.test');
+    expect(() =>
+      resolveRuntimeCookies(
+        [{ ...definition, domain: 'unrelated.example.test' }],
+        'https://staging.example.test',
+        { session_id: 'value' },
+      ),
+    ).toThrow(RuntimeEnvironmentError);
+  });
+
+  test('rejects malformed targets, expired cookies, and invalid attributes', () => {
+    const values = { session_id: 'value' };
+    expect(() =>
+      resolveRuntimeCookies([definition], 'not a URL', values),
+    ).toThrow(RuntimeEnvironmentError);
+    try {
+      resolveRuntimeCookies([definition], 'not a URL', values);
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'INVALID_ENVIRONMENT_COOKIES' });
+    }
+    expect(() =>
+      resolveRuntimeCookies(
+        [{ ...definition, expiresAt: new Date('2026-01-01T00:00:00Z') }],
+        'https://staging.example.test',
+        values,
+        new Date('2026-01-02T00:00:00Z'),
+      ),
+    ).toThrow('Cookie "session_id" has expired');
+    expect(() =>
+      resolveRuntimeCookies(
+        [{ ...definition, sameSite: 'None', secure: false }],
+        'https://staging.example.test',
+        values,
+      ),
+    ).toThrow('SameSite=None without Secure');
+  });
+
+  test('rejects resolved values that browsers cannot store', () => {
+    expect(() =>
+      resolveRuntimeCookies([definition], 'https://staging.example.test', {
+        session_id: 'line one; line two',
+      }),
+    ).toThrow('Cookie "session_id" contains characters');
+    expect(() =>
+      resolveRuntimeCookies([definition], 'https://staging.example.test', {
+        session_id: 'x'.repeat(4_096),
+      }),
+    ).toThrow('Cookie "session_id" exceeds the 4096-byte limit');
+  });
+
+  test('rejects unrelated domains and missing template values before launch', () => {
+    expect(() =>
+      resolveRuntimeCookies([definition], 'https://staging.example.test', {}),
+    ).toThrow('Missing environment variables: session_id');
   });
 });

@@ -1,6 +1,7 @@
 import {
   and,
   db,
+  environmentCookies,
   environmentVariables,
   environments,
   eq,
@@ -33,6 +34,42 @@ function bindEnvironmentRepository(database: Database) {
       return database.query.environments.findFirst({
         where: eq(environments.id, id),
       });
+    },
+    listCookies(environmentId: number) {
+      return database.query.environmentCookies.findMany({
+        where: eq(environmentCookies.environmentId, environmentId),
+        orderBy: (table, { asc }) => [asc(table.name), asc(table.path)],
+      });
+    },
+    findCookie(id: number) {
+      return database.query.environmentCookies.findFirst({
+        where: eq(environmentCookies.id, id),
+      });
+    },
+    async createCookie(values: typeof environmentCookies.$inferInsert) {
+      const [cookie] = await database
+        .insert(environmentCookies)
+        .values(values)
+        .returning();
+      return cookie;
+    },
+    async updateCookie(
+      id: number,
+      values: Partial<typeof environmentCookies.$inferInsert>,
+    ) {
+      const [cookie] = await database
+        .update(environmentCookies)
+        .set({ ...values, updatedAt: new Date() })
+        .where(eq(environmentCookies.id, id))
+        .returning();
+      return cookie;
+    },
+    async deleteCookie(id: number) {
+      const [cookie] = await database
+        .delete(environmentCookies)
+        .where(eq(environmentCookies.id, id))
+        .returning();
+      return cookie;
     },
     listVariables(environmentId: number) {
       return database.query.environmentVariables.findMany({

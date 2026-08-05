@@ -4,6 +4,7 @@ import {
   automationExecutionArtifacts,
   automationExecutionJobs,
   db,
+  environmentCookies,
   environmentVariables,
   eq,
   inArray,
@@ -110,6 +111,25 @@ export function createRunnerRepository(database: Database = db) {
           encryptedValue: true,
           isSecret: true,
         },
+      });
+    },
+    listEnvironmentCookies(environmentId: number) {
+      return database.query.environmentCookies.findMany({
+        where: and(
+          eq(environmentCookies.environmentId, environmentId),
+          eq(environmentCookies.enabled, true),
+        ),
+        columns: {
+          name: true,
+          valueTemplate: true,
+          domain: true,
+          path: true,
+          httpOnly: true,
+          secure: true,
+          sameSite: true,
+          expiresAt: true,
+        },
+        orderBy: (table, { asc }) => [asc(table.name), asc(table.path)],
       });
     },
     async start(id: number, workerId: string) {

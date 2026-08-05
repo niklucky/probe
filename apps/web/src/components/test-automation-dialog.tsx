@@ -359,6 +359,7 @@ function AutomationExecutionHistory({
 }) {
   const [error, setError] = useState('');
   const [captureVideo, setCaptureVideo] = useState(false);
+  const [applyEnvironmentCookies, setApplyEnvironmentCookies] = useState(true);
   const utils = trpc.useContext();
   const { data: jobs = [] } = trpc.automationExecutions.list.useQuery(
     { automationId },
@@ -399,6 +400,16 @@ function AutomationExecutionHistory({
             />
             Video on failure
           </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={applyEnvironmentCookies}
+              onChange={(event) =>
+                setApplyEnvironmentCookies(event.target.checked)
+              }
+            />
+            Environment cookies
+          </label>
           <Button
             size="sm"
             disabled={queue.isPending}
@@ -407,6 +418,7 @@ function AutomationExecutionHistory({
                 automationId,
                 timeoutSeconds: 300,
                 captureVideo,
+                applyEnvironmentCookies,
               })
             }
           >

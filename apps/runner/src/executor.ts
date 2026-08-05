@@ -16,6 +16,7 @@ export interface ExecutionPayload {
   timeoutSeconds: number;
   settings: {
     captureVideo: boolean;
+    applyEnvironmentCookies: boolean;
     containerImage: string;
     cpuLimit: number;
     memoryMb: number;
@@ -46,6 +47,16 @@ export interface ExecutionResult {
 export interface RuntimeEnvironment {
   values: Record<string, string>;
   secretNames: string[];
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'Strict' | 'Lax' | 'None';
+    expires?: number;
+  }>;
 }
 
 interface ExecutionOutcome {
@@ -79,10 +90,10 @@ export function classifyExecutionStatus({
 
 export function redactSecrets(value: string, secrets: Record<string, string>) {
   let sanitized = value;
-  for (const secret of Object.values(secrets).sort(
-    (left, right) => right.length - left.length,
+  for (const [name, secret] of Object.entries(secrets).sort(
+    (left, right) => right[1].length - left[1].length,
   )) {
-    if (secret.length >= 3)
+    if (secret && (secret.length >= 3 || name.startsWith('cookie:')))
       sanitized = sanitized.split(secret).join('[REDACTED]');
   }
   return sanitized
@@ -139,8 +150,13 @@ export function buildDockerArgs(
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',
-    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length ? 'true' : 'false'}`,
+    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length || runtimeEnvironment.cookies.length ? 'true' : 'false'}`,
   ];
+  if (runtimeEnvironment.cookies.length) {
+    // The value is inherited from the runner process and never appears in the
+    // Docker command, queue data, generated source, or persisted results.
+    args.push('--env', 'PROBE_ENVIRONMENT_COOKIES');
+  }
   for (const name of Object.keys(runtimeEnvironment.values).sort()) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
       throw new Error(`Invalid test environment variable: ${name}`);
@@ -151,6 +167,16 @@ export function buildDockerArgs(
   }
   args.push(payload.settings.containerImage);
   return { containerName, args };
+}
+
+export function withEnvironmentCookieHook(source: string, hasCookies: boolean) {
+  if (!hasCookies) return source;
+  return `import { test as __probeCookieTest } from '@playwright/test';
+__probeCookieTest.beforeEach(async ({ context }) => {
+  const cookies = JSON.parse(process.env.PROBE_ENVIRONMENT_COOKIES ?? '[]');
+  await context.addCookies(cookies);
+});
+${source}`;
 }
 
 function approvedTarget(value: string) {
@@ -210,19 +236,29 @@ export async function executeInContainer(
   const sourcePath = join(directory, 'automation.spec.ts');
   // The bind mount is read-only; world-readability lets the image's
   // unprivileged pwuser read a file owned by the host runner on Linux.
-  await writeFile(sourcePath, payload.automation.source, { mode: 0o444 });
+  await writeFile(
+    sourcePath,
+    withEnvironmentCookieHook(
+      payload.automation.source,
+      runtimeEnvironment.cookies.length > 0,
+    ),
+    { mode: 0o444 },
+  );
   const { containerName, args } = buildDockerArgs(
     payload,
     sourcePath,
     artifactDirectory,
     runtimeEnvironment,
   );
-  const secrets = Object.fromEntries(
-    runtimeEnvironment.secretNames.map((name) => [
-      name,
-      runtimeEnvironment.values[name]!,
-    ]),
-  );
+  const secrets = Object.fromEntries([
+    ...runtimeEnvironment.secretNames.map(
+      (name) => [name, runtimeEnvironment.values[name]!] as const,
+    ),
+    ...runtimeEnvironment.cookies.map(
+      (cookie, index) =>
+        [`cookie:${index}:${cookie.name}`, cookie.value] as const,
+    ),
+  ]);
 
   const startedAt = Date.now();
   let outputBytes = 0;
@@ -241,7 +277,17 @@ export async function executeInContainer(
 
   try {
     child = spawn('docker', args, {
-      env: { ...process.env, ...runtimeEnvironment.values },
+      env: {
+        ...process.env,
+        ...runtimeEnvironment.values,
+        ...(runtimeEnvironment.cookies.length
+          ? {
+              PROBE_ENVIRONMENT_COOKIES: JSON.stringify(
+                runtimeEnvironment.cookies,
+              ),
+            }
+          : {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const append = (chunk: Buffer) => {

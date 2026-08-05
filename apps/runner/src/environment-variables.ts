@@ -1,4 +1,10 @@
 import { createDecipheriv } from 'node:crypto';
+import {
+  environmentCookieNameSchema,
+  extractEnvironmentVariableReferences,
+  resolveEnvironmentTemplate,
+  validateEnvironmentCookieDomain,
+} from '@probe/shared/schemas/environments';
 
 export interface StoredEnvironmentVariable {
   key: string;
@@ -10,11 +16,117 @@ export class RuntimeEnvironmentError extends Error {
   constructor(
     readonly code:
       | 'MISSING_ENVIRONMENT_VARIABLES'
-      | 'ENVIRONMENT_VARIABLE_DECRYPTION_FAILED',
+      | 'ENVIRONMENT_VARIABLE_DECRYPTION_FAILED'
+      | 'INVALID_ENVIRONMENT_COOKIES',
     message: string,
   ) {
     super(message);
     this.name = 'RuntimeEnvironmentError';
+  }
+}
+
+export interface StoredEnvironmentCookie {
+  name: string;
+  valueTemplate: string;
+  domain: string | null;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'Strict' | 'Lax' | 'None';
+  expiresAt: Date | null;
+}
+
+export interface RuntimeCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'Strict' | 'Lax' | 'None';
+  expires?: number;
+}
+
+export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {
+  return [
+    ...new Set(
+      cookies.flatMap(({ valueTemplate }) =>
+        extractEnvironmentVariableReferences(valueTemplate),
+      ),
+    ),
+  ].sort();
+}
+
+export function runtimeSensitiveVariableNames(
+  secretNames: string[],
+  cookieReferences: string[],
+) {
+  return [...new Set([...secretNames, ...cookieReferences])];
+}
+
+export function resolveRuntimeCookies(
+  cookies: StoredEnvironmentCookie[],
+  baseUrl: string,
+  values: Record<string, string>,
+  now = new Date(),
+): RuntimeCookie[] {
+  try {
+    const target = new URL(baseUrl);
+    return cookies.map((cookie) => {
+      environmentCookieNameSchema.parse(cookie.name);
+      validateEnvironmentCookieDomain(cookie.domain, baseUrl);
+      if (!cookie.path.startsWith('/')) {
+        throw new Error(`Cookie "${cookie.name}" has an invalid path`);
+      }
+      if (cookie.path.length > 2_048) {
+        throw new Error(`Cookie "${cookie.name}" has an invalid path`);
+      }
+      if (!['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
+        throw new Error(
+          `Cookie "${cookie.name}" has an invalid SameSite value`,
+        );
+      }
+      if (cookie.sameSite === 'None' && !cookie.secure) {
+        throw new Error(
+          `Cookie "${cookie.name}" uses SameSite=None without Secure`,
+        );
+      }
+      const expires = cookie.expiresAt
+        ? Math.floor(cookie.expiresAt.getTime() / 1000)
+        : undefined;
+      if (
+        expires !== undefined &&
+        cookie.expiresAt!.getTime() <= now.getTime()
+      ) {
+        throw new Error(`Cookie "${cookie.name}" has expired`);
+      }
+      const value = resolveEnvironmentTemplate(cookie.valueTemplate, values);
+      if (!/^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/.test(value)) {
+        throw new Error(
+          `Cookie "${cookie.name}" contains characters that browsers do not allow`,
+        );
+      }
+      if (Buffer.byteLength(`${cookie.name}=${value}`, 'utf8') > 4_096) {
+        throw new Error(`Cookie "${cookie.name}" exceeds the 4096-byte limit`);
+      }
+      return {
+        name: cookie.name,
+        value,
+        domain: cookie.domain ?? target.hostname,
+        path: cookie.path,
+        httpOnly: cookie.httpOnly,
+        secure: cookie.secure,
+        sameSite: cookie.sameSite,
+        ...(expires === undefined ? {} : { expires }),
+      };
+    });
+  } catch (error) {
+    throw new RuntimeEnvironmentError(
+      'INVALID_ENVIRONMENT_COOKIES',
+      error instanceof Error
+        ? error.message
+        : 'Environment cookies are invalid',
+    );
   }
 }
 

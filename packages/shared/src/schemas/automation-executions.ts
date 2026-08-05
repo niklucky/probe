@@ -15,6 +15,7 @@ export const queueAutomationExecutionInputSchema = z.object({
   automationId: z.number().int().positive(),
   timeoutSeconds: z.number().int().min(10).max(1800).default(300),
   captureVideo: z.boolean().default(false),
+  applyEnvironmentCookies: z.boolean().default(true),
 });
 
 export const listAutomationExecutionsInputSchema = z.object({
