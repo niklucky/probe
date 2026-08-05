@@ -1,6 +1,8 @@
 import { createDecipheriv } from 'node:crypto';
 import {
   environmentCookieNameSchema,
+  environmentHeaderNameSchema,
+  environmentHeaderOriginSchema,
   extractEnvironmentVariableReferences,
   resolveEnvironmentTemplate,
   validateEnvironmentCookieDomain,
@@ -17,7 +19,8 @@ export class RuntimeEnvironmentError extends Error {
     readonly code:
       | 'MISSING_ENVIRONMENT_VARIABLES'
       | 'ENVIRONMENT_VARIABLE_DECRYPTION_FAILED'
-      | 'INVALID_ENVIRONMENT_COOKIES',
+      | 'INVALID_ENVIRONMENT_COOKIES'
+      | 'INVALID_ENVIRONMENT_HEADERS',
     message: string,
   ) {
     super(message);
@@ -47,6 +50,26 @@ export interface RuntimeCookie {
   expires?: number;
 }
 
+export interface StoredEnvironmentHeader {
+  name: string;
+  valueTemplate: string;
+  origin: string;
+}
+
+export interface RuntimeHeader {
+  name: string;
+  value: string;
+  origin: string;
+}
+
+export function headersForRequestOrigin(
+  headers: RuntimeHeader[],
+  requestUrl: string,
+) {
+  const origin = new URL(requestUrl).origin;
+  return headers.filter((header) => header.origin === origin);
+}
+
 export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {
   return [
     ...new Set(
@@ -57,11 +80,52 @@ export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {
   ].sort();
 }
 
+export function headerVariableReferences(headers: StoredEnvironmentHeader[]) {
+  return [
+    ...new Set(
+      headers.flatMap(({ valueTemplate }) =>
+        extractEnvironmentVariableReferences(valueTemplate),
+      ),
+    ),
+  ].sort();
+}
+
 export function runtimeSensitiveVariableNames(
   secretNames: string[],
   cookieReferences: string[],
+  headerReferences: string[] = [],
 ) {
-  return [...new Set([...secretNames, ...cookieReferences])];
+  return [
+    ...new Set([...secretNames, ...cookieReferences, ...headerReferences]),
+  ];
+}
+
+export function resolveRuntimeHeaders(
+  headers: StoredEnvironmentHeader[],
+  values: Record<string, string>,
+): RuntimeHeader[] {
+  try {
+    return headers.map((header) => {
+      const name = environmentHeaderNameSchema.parse(header.name);
+      const origin = environmentHeaderOriginSchema.parse(header.origin);
+      if (origin !== header.origin) {
+        throw new Error(`Header "${name}" has a non-canonical origin`);
+      }
+      const value = resolveEnvironmentTemplate(header.valueTemplate, values);
+      if (/[\r\n]/.test(value)) {
+        throw new Error(`Header "${name}" contains a line break`);
+      }
+      if (Buffer.byteLength(value, 'utf8') > 16_384) {
+        throw new Error(`Header "${name}" exceeds the 16384-byte limit`);
+      }
+      return { name, value, origin };
+    });
+  } catch (error) {
+    throw new RuntimeEnvironmentError(
+      'INVALID_ENVIRONMENT_HEADERS',
+      error instanceof Error ? error.message : 'Environment headers are invalid',
+    );
+  }
 }
 
 export function resolveRuntimeCookies(

@@ -1,6 +1,7 @@
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import {
   environmentCookies,
+  environmentHeaders,
   environmentVariables,
   environments,
 } from '@probe/db';
@@ -206,6 +207,122 @@ export const environmentCookieIdInputSchema = z.object({
   id: z.number().int().positive(),
 });
 
+const reservedEnvironmentHeaderNames = new Set([
+  'accept-charset',
+  'accept-encoding',
+  'access-control-request-headers',
+  'access-control-request-method',
+  'connection',
+  'content-length',
+  'cookie',
+  'cookie2',
+  'date',
+  'dnt',
+  'expect',
+  'forwarded',
+  'host',
+  'keep-alive',
+  'origin',
+  'permissions-policy',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'proxy-connection',
+  'referer',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'user-agent',
+  'via',
+]);
+
+export function isReservedEnvironmentHeaderName(value: string) {
+  const name = value.trim().toLowerCase();
+  return (
+    reservedEnvironmentHeaderNames.has(name) ||
+    name.startsWith('proxy-') ||
+    name.startsWith('sec-') ||
+    name.startsWith('x-forwarded-') ||
+    name.startsWith('x-probe-')
+  );
+}
+
+export const environmentHeaderNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .regex(
+    /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/,
+    'Header name contains invalid characters',
+  )
+  .refine(
+    (value) => !isReservedEnvironmentHeaderName(value),
+    'Header name is reserved or managed by the browser runner',
+  );
+
+export const environmentHeaderValueTemplateSchema = z
+  .string()
+  .min(1)
+  .max(16_384)
+  .refine((value) => !/[\r\n]/.test(value), 'Header value must be one line')
+  .refine(
+    (value) => extractEnvironmentVariableReferences(value).length > 0,
+    'Header value must reference at least one environment variable',
+  );
+
+export const environmentHeaderOriginSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(2_048)
+  .refine((value) => {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  }, 'Header origin must use HTTP or HTTPS')
+  .refine((value) => {
+    const url = new URL(value);
+    return !url.username && !url.password;
+  }, 'Header origin must not contain credentials')
+  .transform((value) => new URL(value).origin);
+
+export const environmentHeaderSchema = createSelectSchema(
+  environmentHeaders,
+).pick({
+  id: true,
+  environmentId: true,
+  name: true,
+  valueTemplate: true,
+  origin: true,
+  enabled: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const listEnvironmentHeadersInputSchema = z.object({
+  environmentId: z.number().int().positive(),
+});
+
+const headerDefinitionFields = z.object({
+  name: environmentHeaderNameSchema,
+  valueTemplate: environmentHeaderValueTemplateSchema,
+  origin: environmentHeaderOriginSchema.optional(),
+  enabled: z.boolean().default(true),
+});
+
+export const createEnvironmentHeaderInputSchema = headerDefinitionFields.extend(
+  { environmentId: z.number().int().positive() },
+);
+
+export const updateEnvironmentHeaderInputSchema = headerDefinitionFields
+  .partial()
+  .extend({ id: z.number().int().positive() });
+
+export const environmentHeaderIdInputSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 const placeholderPattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 function validateCookieAttributeCombination(
@@ -304,4 +421,10 @@ export type CreateEnvironmentCookieInput = z.infer<
 >;
 export type UpdateEnvironmentCookieInput = z.infer<
   typeof updateEnvironmentCookieInputSchema
+>;
+export type CreateEnvironmentHeaderInput = z.infer<
+  typeof createEnvironmentHeaderInputSchema
+>;
+export type UpdateEnvironmentHeaderInput = z.infer<
+  typeof updateEnvironmentHeaderInputSchema
 >;

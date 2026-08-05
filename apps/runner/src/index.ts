@@ -11,8 +11,10 @@ import {
 } from './executor';
 import {
   cookieVariableReferences,
+  headerVariableReferences,
   resolveRuntimeEnvironment,
   resolveRuntimeCookies,
+  resolveRuntimeHeaders,
   runtimeSensitiveVariableNames,
   RuntimeEnvironmentError,
 } from './environment-variables';
@@ -93,11 +95,16 @@ async function runClaimedJob(jobId: number) {
     const cookieDefinitions = payload.settings.applyEnvironmentCookies
       ? await repository.listEnvironmentCookies(payload.environmentId)
       : [];
+    const headerDefinitions = payload.settings.applyEnvironmentHeaders
+      ? await repository.listEnvironmentHeaders(payload.environmentId)
+      : [];
     const cookieReferences = cookieVariableReferences(cookieDefinitions);
+    const headerReferences = headerVariableReferences(headerDefinitions);
     const references = [
       ...new Set([
         ...sourceReferences.filter((name) => name !== 'BASE_URL'),
         ...cookieReferences,
+        ...headerReferences,
       ]),
     ].sort();
     const variables = await repository.listEnvironmentVariables(
@@ -117,10 +124,15 @@ async function runClaimedJob(jobId: number) {
       secretNames: runtimeSensitiveVariableNames(
         resolvedEnvironment.secretNames,
         cookieReferences,
+        headerReferences,
       ),
       cookies: resolveRuntimeCookies(
         cookieDefinitions,
         payload.environment.baseUrl,
+        resolvedEnvironment.values,
+      ),
+      headers: resolveRuntimeHeaders(
+        headerDefinitions,
         resolvedEnvironment.values,
       ),
     };

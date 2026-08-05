@@ -5,6 +5,7 @@ import {
   classifyExecutionStatus,
   redactSecrets,
   withEnvironmentCookieHook,
+  withEnvironmentHeaderHook,
   type ExecutionPayload,
 } from './executor';
 
@@ -14,6 +15,7 @@ const payload: ExecutionPayload = {
   settings: {
     captureVideo: false,
     applyEnvironmentCookies: true,
+    applyEnvironmentHeaders: true,
     containerImage: 'probe-playwright-runner:1',
     cpuLimit: 1,
     memoryMb: 512,
@@ -31,7 +33,7 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: {}, secretNames: [], cookies: [] },
+      { values: {}, secretNames: [], cookies: [], headers: [] },
     );
     expect(args).toContain('--read-only');
     expect(args).toContain('--cap-drop=ALL');
@@ -58,6 +60,7 @@ describe('isolated execution command', () => {
         values: { TEST_PASSWORD: secretValue },
         secretNames: ['TEST_PASSWORD'],
         cookies: [],
+        headers: [],
       },
     );
     expect(args).toContain('TEST_PASSWORD');
@@ -81,6 +84,7 @@ describe('isolated execution command', () => {
           sameSite: 'Lax' as const,
         },
       ],
+      headers: [],
     };
     const { args } = buildDockerArgs(
       payload,
@@ -101,6 +105,41 @@ describe('isolated execution command', () => {
     expect(source).not.toContain(cookieValue);
   });
 
+  test('passes resolved headers by environment name and installs a per-request origin check', () => {
+    const headerValue = 'Bearer private-header-value';
+    const runtime = {
+      values: {},
+      secretNames: [],
+      cookies: [],
+      headers: [
+        {
+          name: 'Authorization',
+          value: headerValue,
+          origin: 'https://staging.example.test',
+        },
+      ],
+    };
+    const { args } = buildDockerArgs(
+      payload,
+      '/tmp/source.ts',
+      '/tmp/artifacts',
+      runtime,
+    );
+    expect(args).toContain('PROBE_ENVIRONMENT_HEADERS');
+    expect(args).toContain('HAS_TEST_SECRETS=true');
+    expect(args.join(' ')).not.toContain(headerValue);
+    const source = withEnvironmentHeaderHook(
+      `test('opens', async ({ page }) => page.goto('/'));`,
+      true,
+    );
+    expect(source).toContain("context.route('**/*'");
+    expect(source).toContain('new URL(request.url()).origin');
+    expect(source).toContain('header.origin === requestOrigin');
+    expect(source).toContain('maxRedirects: 0');
+    expect(source).toContain('route.fulfill({ response })');
+    expect(source).not.toContain(headerValue);
+  });
+
   test('redacts runtime secrets and common bearer credentials from logs', () => {
     const secretValue = ['fixture', 'value'].join('-');
     const bearerValue = 'fixture'.repeat(3);
@@ -115,6 +154,9 @@ describe('isolated execution command', () => {
     expect(redactSecrets('cookie=x', { 'cookie:0:short': 'x' })).toBe(
       'cookie=[REDACTED]',
     );
+    expect(redactSecrets('header=x', { 'header:0:short': 'x' })).toBe(
+      'header=[REDACTED]',
+    );
   });
 
   test('does not apply secret artifact policy to non-secret runtime values', () => {
@@ -122,7 +164,12 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: { username: 'qa-user' }, secretNames: [], cookies: [] },
+      {
+        values: { username: 'qa-user' },
+        secretNames: [],
+        cookies: [],
+        headers: [],
+      },
     );
     expect(args).toContain('username');
     expect(args).toContain('HAS_TEST_SECRETS=false');
@@ -134,6 +181,7 @@ describe('isolated execution command', () => {
         values: { 'BAD-NAME': 'secret' },
         secretNames: ['BAD-NAME'],
         cookies: [],
+        headers: [],
       }),
     ).toThrow('Invalid test environment variable');
   });
@@ -148,7 +196,7 @@ describe('isolated execution command', () => {
           },
           '/tmp/source.ts',
           '/tmp/artifacts',
-          { values: {}, secretNames: [], cookies: [] },
+          { values: {}, secretNames: [], cookies: [], headers: [] },
         ),
       ).toThrow('dedicated egress-controlled Docker network');
     }

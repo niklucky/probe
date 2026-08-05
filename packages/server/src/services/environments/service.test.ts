@@ -12,6 +12,7 @@ function fixture(
   let nextId = 1;
   const records: Array<Record<string, any>> = [];
   const cookies: Array<Record<string, any>> = [];
+  const headers: Array<Record<string, any>> = [];
   const environment = {
     id: 7,
     projectId: 2,
@@ -62,6 +63,34 @@ function fixture(
       const index = cookies.findIndex((cookie) => cookie.id === id);
       if (index === -1) return undefined;
       return cookies.splice(index, 1)[0];
+    },
+    async listHeaders(environmentId: number) {
+      return headers.filter((header) => header.environmentId === environmentId);
+    },
+    async findHeader(id: number) {
+      return headers.find((header) => header.id === id);
+    },
+    async createHeader(values: Record<string, any>) {
+      const now = new Date();
+      const header = {
+        id: nextId++,
+        createdAt: now,
+        updatedAt: now,
+        ...values,
+      };
+      headers.push(header);
+      return header;
+    },
+    async updateHeader(id: number, values: Record<string, any>) {
+      const header = headers.find((candidate) => candidate.id === id);
+      if (!header) return undefined;
+      Object.assign(header, values, { updatedAt: new Date() });
+      return header;
+    },
+    async deleteHeader(id: number) {
+      const index = headers.findIndex((header) => header.id === id);
+      if (index === -1) return undefined;
+      return headers.splice(index, 1)[0];
     },
     async findVariable(id: number) {
       return records.find((record) => record.id === id);
@@ -114,7 +143,7 @@ function fixture(
     authorization as never,
     createEnvironmentVariableCipher(Buffer.alloc(32, 12).toString('base64')),
   );
-  return { service, records, cookies };
+  return { service, records, cookies, headers };
 }
 
 describe('environment variable service', () => {
@@ -382,5 +411,50 @@ describe('environment cookie service', () => {
     await expect(
       service.updateCookie({ id: cookie!.id, secure: false }, 3),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
+
+describe('environment header service', () => {
+  test('defaults to the base origin and stores only the unresolved template', async () => {
+    const { service, headers } = fixture();
+    const created = await service.createHeader(
+      {
+        environmentId: 7,
+        name: 'Authorization',
+        valueTemplate: 'Bearer {{access_token}}',
+        enabled: true,
+      },
+      3,
+    );
+
+    expect(created).toMatchObject({
+      name: 'Authorization',
+      valueTemplate: 'Bearer {{access_token}}',
+      origin: 'https://staging.example.test',
+    });
+    expect(headers[0]).not.toHaveProperty('value');
+    expect(JSON.stringify(created)).not.toContain('resolved-token');
+    expect(await service.listHeaders(7, 3)).toEqual([created]);
+  });
+
+  test('supports origin-scoped updates and deletion', async () => {
+    const { service } = fixture();
+    const created = await service.createHeader(
+      {
+        environmentId: 7,
+        name: 'X-Test-Tenant',
+        valueTemplate: '{{tenant_id}}',
+        origin: 'https://api.example.test',
+        enabled: true,
+      },
+      3,
+    );
+    await expect(
+      service.updateHeader({ id: created!.id, enabled: false }, 3),
+    ).resolves.toMatchObject({ enabled: false });
+    await expect(service.deleteHeader(created!.id, 3)).resolves.toEqual({
+      success: true,
+    });
+    await expect(service.listHeaders(7, 3)).resolves.toEqual([]);
   });
 });

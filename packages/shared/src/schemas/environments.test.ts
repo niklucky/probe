@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createEnvironmentCookieInputSchema,
+  createEnvironmentHeaderInputSchema,
   environmentVariableKeySchema,
   extractEnvironmentVariableReferences,
   extractEnvironmentVariableReferencesFromValue,
@@ -38,6 +39,52 @@ describe('environment variable placeholders', () => {
         tags: ['{{tag_name}}'],
       }),
     ).toEqual(['username', 'tenant', 'password', 'tag_name']);
+  });
+});
+
+describe('environment header definitions', () => {
+  const base = {
+    environmentId: 1,
+    name: 'Authorization',
+    valueTemplate: 'Bearer {{access_token}}',
+    origin: 'https://staging.example.test/app',
+    enabled: true,
+  };
+
+  test('normalizes exact origins and requires variable-backed values', () => {
+    expect(createEnvironmentHeaderInputSchema.parse(base).origin).toBe(
+      'https://staging.example.test',
+    );
+    expect(
+      createEnvironmentHeaderInputSchema.safeParse({
+        ...base,
+        valueTemplate: 'Bearer plaintext-secret',
+      }).success,
+    ).toBe(false);
+  });
+
+  test('rejects reserved, transport-managed, and runner-managed names', () => {
+    for (const name of [
+      'Host',
+      'Content-Length',
+      'Cookie',
+      'Connection',
+      'Forwarded',
+      'X-Forwarded-For',
+      'Sec-Fetch-Site',
+      'X-Probe-Internal',
+    ]) {
+      expect(
+        createEnvironmentHeaderInputSchema.safeParse({ ...base, name })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      createEnvironmentHeaderInputSchema.safeParse({
+        ...base,
+        name: 'X-Test-Tenant',
+      }).success,
+    ).toBe(true);
   });
 });
 

@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { createCipheriv } from 'node:crypto';
 import {
   cookieVariableReferences,
+  headerVariableReferences,
+  headersForRequestOrigin,
   resolveRuntimeCookies,
   resolveRuntimeEnvironment,
+  resolveRuntimeHeaders,
   RuntimeEnvironmentError,
   runtimeSensitiveVariableNames,
 } from './environment-variables';
@@ -107,6 +110,72 @@ describe('execution environment variables', () => {
     );
     expect(first.values.username).toBe('first');
     expect(second.values.username).toBe('second');
+  });
+});
+
+describe('execution environment headers', () => {
+  const definition = {
+    name: 'Authorization',
+    valueTemplate: 'Bearer {{access_token}}',
+    origin: 'https://staging.example.test',
+  };
+
+  test('resolves templates and treats referenced values as sensitive', () => {
+    expect(headerVariableReferences([definition])).toEqual(['access_token']);
+    expect(
+      resolveRuntimeHeaders([definition], { access_token: 'private-token' }),
+    ).toEqual([
+      {
+        name: 'Authorization',
+        value: 'Bearer private-token',
+        origin: 'https://staging.example.test',
+      },
+    ]);
+    expect(
+      runtimeSensitiveVariableNames(
+        ['password'],
+        ['session_id'],
+        ['access_token'],
+      ),
+    ).toEqual(['password', 'session_id', 'access_token']);
+  });
+
+  test('matches every request independently so redirects cannot leak headers', () => {
+    const headers = resolveRuntimeHeaders([definition], {
+      access_token: 'private-token',
+    });
+    expect(
+      headersForRequestOrigin(
+        headers,
+        'https://staging.example.test/start?next=redirect',
+      ),
+    ).toHaveLength(1);
+    expect(
+      headersForRequestOrigin(headers, 'https://identity.example.test/login'),
+    ).toEqual([]);
+    expect(
+      headersForRequestOrigin(headers, 'http://staging.example.test/insecure'),
+    ).toEqual([]);
+  });
+
+  test('rejects reserved names, malformed origins, line breaks, and missing values', () => {
+    expect(() =>
+      resolveRuntimeHeaders([{ ...definition, name: 'Host' }], {
+        access_token: 'value',
+      }),
+    ).toThrow('reserved or managed');
+    expect(() =>
+      resolveRuntimeHeaders(
+        [{ ...definition, origin: 'https://staging.example.test/' }],
+        { access_token: 'value' },
+      ),
+    ).toThrow('non-canonical origin');
+    expect(() =>
+      resolveRuntimeHeaders([definition], { access_token: 'line\nbreak' }),
+    ).toThrow('contains a line break');
+    expect(() => resolveRuntimeHeaders([definition], {})).toThrow(
+      'Missing environment variables: access_token',
+    );
   });
 });
 

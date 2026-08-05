@@ -27,7 +27,11 @@ function execution(id = 41, automationSource = originalSource) {
     environmentId: 9,
     status: 'failed',
     timeoutSeconds: 120,
-    settings: { captureVideo: false, applyEnvironmentCookies: true },
+    settings: {
+      captureVideo: false,
+      applyEnvironmentCookies: true,
+      applyEnvironmentHeaders: true,
+    },
     errorCode: 'PLAYWRIGHT_FAILED',
     errorMessage:
       'locator(".old-login") resolved to no element password=hunter2',

@@ -62,6 +62,7 @@ export function createAutomationExecutionService(
           browser: 'chromium',
           captureVideo: input.captureVideo,
           applyEnvironmentCookies: input.applyEnvironmentCookies,
+          applyEnvironmentHeaders: input.applyEnvironmentHeaders,
           runnerVersion: runner.version,
           containerImage: runner.containerImage,
           cpuLimit: runner.cpuLimit,
