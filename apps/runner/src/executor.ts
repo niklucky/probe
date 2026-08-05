@@ -43,6 +43,11 @@ export interface ExecutionResult {
   cleanup: () => Promise<void>;
 }
 
+export interface RuntimeEnvironment {
+  values: Record<string, string>;
+  secretNames: string[];
+}
+
 interface ExecutionOutcome {
   infrastructureError: boolean;
   artifactLimitExceeded: boolean;
@@ -72,22 +77,6 @@ export function classifyExecutionStatus({
   return exitCode === 0 ? 'passed' : 'failed';
 }
 
-export function selectRuntimeSecrets(
-  source: string,
-  available: Record<string, string>,
-) {
-  const names = new Set<string>();
-  for (const match of source.matchAll(
-    /process\.env(?:\.([A-Z_][A-Z0-9_]*)|\[['"]([A-Z_][A-Z0-9_]*)['"]\])/g,
-  )) {
-    const name = match[1] ?? match[2];
-    if (name && available[name] !== undefined) names.add(name);
-  }
-  return Object.fromEntries(
-    [...names].sort().map((name) => [name, available[name]!]),
-  );
-}
-
 export function redactSecrets(value: string, secrets: Record<string, string>) {
   let sanitized = value;
   for (const secret of Object.values(secrets).sort(
@@ -105,8 +94,13 @@ export function buildDockerArgs(
   payload: ExecutionPayload,
   sourcePath: string,
   artifactDirectory: string,
-  secrets: Record<string, string>,
+  runtimeEnvironment: RuntimeEnvironment,
 ) {
+  for (const name of runtimeEnvironment.secretNames) {
+    if (!(name in runtimeEnvironment.values)) {
+      throw new Error(`Missing injected secret environment variable: ${name}`);
+    }
+  }
   if (
     ['host', 'bridge', 'default', 'none'].includes(
       payload.settings.networkPolicy,
@@ -145,11 +139,11 @@ export function buildDockerArgs(
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',
-    `HAS_TEST_SECRETS=${Object.keys(secrets).length ? 'true' : 'false'}`,
+    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length ? 'true' : 'false'}`,
   ];
-  for (const name of Object.keys(secrets).sort()) {
-    if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
-      throw new Error(`Invalid test secret environment variable: ${name}`);
+  for (const name of Object.keys(runtimeEnvironment.values).sort()) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`Invalid test environment variable: ${name}`);
     }
     // Docker reads the value from the runner environment. It never appears in
     // process arguments, source, queue records, or result data.
@@ -202,7 +196,7 @@ export async function cleanupAbandonedExecution(jobId: number) {
 
 export async function executeInContainer(
   payload: ExecutionPayload,
-  secrets: Record<string, string>,
+  runtimeEnvironment: RuntimeEnvironment,
   hooks: {
     heartbeat: () => Promise<boolean>;
   },
@@ -221,7 +215,13 @@ export async function executeInContainer(
     payload,
     sourcePath,
     artifactDirectory,
-    secrets,
+    runtimeEnvironment,
+  );
+  const secrets = Object.fromEntries(
+    runtimeEnvironment.secretNames.map((name) => [
+      name,
+      runtimeEnvironment.values[name]!,
+    ]),
   );
 
   const startedAt = Date.now();
@@ -241,7 +241,7 @@ export async function executeInContainer(
 
   try {
     child = spawn('docker', args, {
-      env: { ...process.env, ...secrets },
+      env: { ...process.env, ...runtimeEnvironment.values },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const append = (chunk: Buffer) => {

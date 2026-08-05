@@ -124,6 +124,31 @@ export function extractEnvironmentVariableReferences(value: string) {
   ];
 }
 
+export function extractEnvironmentVariableReferencesFromValue(value: unknown) {
+  const references: string[] = [];
+  const seen = new Set<string>();
+  const visit = (current: unknown) => {
+    if (typeof current === 'string') {
+      for (const key of extractEnvironmentVariableReferences(current)) {
+        if (!seen.has(key)) {
+          seen.add(key);
+          references.push(key);
+        }
+      }
+      return;
+    }
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+    if (current && typeof current === 'object') {
+      Object.values(current).forEach(visit);
+    }
+  };
+  visit(value);
+  return references;
+}
+
 export type CreateEnvironmentInput = z.infer<
   typeof createEnvironmentInputSchema
 >;

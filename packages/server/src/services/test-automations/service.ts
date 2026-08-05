@@ -4,7 +4,9 @@ import {
   ConflictError,
   NotFoundError,
 } from '@probe/shared/errors/app-error';
+import { extractAutomationEnvironmentReferences } from '@probe/shared/automation-environment';
 import type { GenerateTestAutomationInput } from '@probe/shared/schemas/test-automations';
+import { extractEnvironmentVariableReferencesFromValue } from '@probe/shared/schemas/environments';
 import { format } from 'prettier';
 import ts from 'typescript';
 import type { TestAutomationRepository } from '../../repositories/test-automations/repository';
@@ -31,7 +33,15 @@ function cleanGeneratedSource(source: string) {
     .replace(/\s*```$/, '');
 }
 
-export async function validateAndFormatAutomationSource(source: string) {
+export interface AutomationEnvironmentValidation {
+  allowed: Iterable<string>;
+  required?: Iterable<string>;
+}
+
+export async function validateAndFormatAutomationSource(
+  source: string,
+  environment?: AutomationEnvironmentValidation,
+) {
   const cleaned = cleanGeneratedSource(source);
   if (!cleaned) throw new BadRequestError('Generated source is empty');
   if (SOURCE_SECRET_PATTERNS.some((pattern) => pattern.test(cleaned))) {
@@ -58,6 +68,32 @@ export async function validateAndFormatAutomationSource(source: string) {
       '\n',
     );
     throw new BadRequestError(`Invalid TypeScript: ${message}`);
+  }
+
+  if (environment) {
+    const { references, hasDynamicReference } =
+      extractAutomationEnvironmentReferences(cleaned);
+    if (hasDynamicReference) {
+      throw new BadRequestError(
+        'Automation source must use static process.env.NAME or process.env["NAME"] references',
+      );
+    }
+    const allowed = new Set([...environment.allowed, 'BASE_URL']);
+    const unknown = references.filter((name) => !allowed.has(name));
+    if (unknown.length) {
+      throw new BadRequestError(
+        `Automation references variables missing from the selected environment: ${unknown.join(', ')}`,
+      );
+    }
+    const referenced = new Set(references);
+    const missing = [...(environment.required ?? [])].filter(
+      (name) => !referenced.has(name),
+    );
+    if (missing.length) {
+      throw new BadRequestError(
+        `Automation does not reference required manual-test variables: ${missing.join(', ')}`,
+      );
+    }
   }
 
   return format(cleaned, {
@@ -124,6 +160,38 @@ export function createTestAutomationService(
         throw new NotFoundError('Environment not found');
       }
 
+      const specification = {
+        title: sourceVersion.title,
+        description: sourceVersion.description,
+        prerequisites: sourceVersion.prerequisites,
+        steps: sourceVersion.steps,
+        expectedResult: sourceVersion.expectedResult,
+        tags: sourceVersion.tags,
+      };
+      const requiredVariables =
+        extractEnvironmentVariableReferencesFromValue(specification);
+      const variableMetadata = await environments.listVariableMetadata(
+        environment.id,
+        userId,
+      );
+      const availableVariables = new Set(
+        variableMetadata.map(({ key }) => key),
+      );
+      const missingVariables = requiredVariables.filter(
+        (key) => !availableVariables.has(key),
+      );
+      if (missingVariables.length) {
+        throw new BadRequestError(
+          `Manual test references variables missing from the selected environment: ${missingVariables.join(', ')}`,
+        );
+      }
+      const referencedMetadata = requiredVariables.map((key) => {
+        const { description, isSecret } = variableMetadata.find(
+          (variable) => variable.key === key,
+        )!;
+        return { key, description, isSecret };
+      });
+
       try {
         const { adapter, connectionRef } = await aiConnections.getAdapter(
           'test-authoring',
@@ -133,7 +201,11 @@ export function createTestAutomationService(
           source: string;
         }>({
           system: automationSystemPrompt,
-          prompt: automationPrompt(sourceVersion, environment),
+          prompt: automationPrompt(
+            specification,
+            environment,
+            referencedMetadata,
+          ),
           schema: automationSourceJsonSchema,
           schemaName: 'playwright_typescript_automation',
         });
@@ -148,6 +220,7 @@ export function createTestAutomationService(
         }
         const source = await validateAndFormatAutomationSource(
           result.value.source,
+          { allowed: availableVariables, required: requiredVariables },
         );
         const automation = await repository.withTransaction(
           async (transactionRepository) => {
@@ -220,7 +293,22 @@ export function createTestAutomationService(
       if (automation.status !== 'generated') {
         throw new ConflictError('Automation proposal is no longer available');
       }
-      const formatted = await validateAndFormatAutomationSource(source);
+      const variableMetadata = await environments.listVariableMetadata(
+        automation.environmentId,
+        userId,
+      );
+      const requiredVariables = extractEnvironmentVariableReferencesFromValue({
+        title: automation.sourceTestCaseVersion.title,
+        description: automation.sourceTestCaseVersion.description,
+        prerequisites: automation.sourceTestCaseVersion.prerequisites,
+        steps: automation.sourceTestCaseVersion.steps,
+        expectedResult: automation.sourceTestCaseVersion.expectedResult,
+        tags: automation.sourceTestCaseVersion.tags,
+      });
+      const formatted = await validateAndFormatAutomationSource(source, {
+        allowed: variableMetadata.map(({ key }) => key),
+        required: requiredVariables,
+      });
       const accepted = await repository.accept(id, formatted, userId);
       return publicAutomation({
         ...accepted,

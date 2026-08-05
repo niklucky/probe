@@ -12,10 +12,10 @@ const sourceVersion = {
   versionNumber: 3,
   title: 'Sign in',
   description: 'A user signs in',
-  prerequisites: ['A registered user'],
+  prerequisites: ['A registered user {{username}} with {{password}}'],
   steps: [
     {
-      action: 'Enter valid credentials and submit',
+      action: 'Enter {{username}} and {{password}}, then submit',
       expectedResult: 'The dashboard opens',
     },
   ],
@@ -59,8 +59,8 @@ import { test, expect } from '@playwright/test';
 
 test('sign in', async ({ page }) => {
   await page.goto('https://staging.example.test');
-  await page.getByLabel('Email').fill(process.env.TEST_USER_EMAIL ?? '');
-  await page.getByLabel('Password').fill(process.env.TEST_USER_PASSWORD ?? '');
+  await page.getByLabel('Email').fill(process.env.username ?? '');
+  await page.getByLabel('Password').fill(process.env.password ?? '');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
 });
@@ -151,6 +151,22 @@ describe('Playwright automation generation', () => {
         async get() {
           return environment;
         },
+        async listVariableMetadata() {
+          return [
+            {
+              key: 'username',
+              description: 'QA login',
+              isSecret: false,
+              value: 'must-not-reach-provider',
+            },
+            {
+              key: 'password',
+              description: 'QA password',
+              isSecret: true,
+              value: 'super-private-fixture',
+            },
+          ];
+        },
       } as never,
     );
 
@@ -173,6 +189,11 @@ describe('Playwright automation generation', () => {
     expect(result.stale).toBe(false);
     expect(result.source).toContain('getByRole');
     expect(requests[0]).not.toHaveProperty('temperature');
+    const prompt = String(requests[0]?.prompt);
+    expect(prompt).toContain('{{username}} => process.env.username');
+    expect(prompt).toContain('"isSecret":true');
+    expect(prompt).not.toContain('must-not-reach-provider');
+    expect(prompt).not.toContain('super-private-fixture');
   });
 
   test('marks automation stale when the current manual version changes', async () => {
@@ -193,7 +214,14 @@ describe('Playwright automation generation', () => {
       } as never,
       { async require() {} } as never,
       {} as never,
-      {} as never,
+      {
+        async listVariableMetadata() {
+          return [
+            { key: 'username', description: null, isSecret: false },
+            { key: 'password', description: null, isSecret: true },
+          ];
+        },
+      } as never,
     );
 
     const [result] = await service.list(5, 2);
@@ -214,6 +242,67 @@ describe('Playwright automation generation', () => {
         `const password = "super-secret-password";`,
       ),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+
+    await expect(
+      validateAndFormatAutomationSource(`console.log(process.env.unknown)`, {
+        allowed: ['username'],
+      }),
+    ).rejects.toThrow('missing from the selected environment: unknown');
+    await expect(
+      validateAndFormatAutomationSource(`console.log(process.env[key])`, {
+        allowed: ['username'],
+      }),
+    ).rejects.toThrow('static process.env');
+    await expect(
+      validateAndFormatAutomationSource(`console.log('no credentials')`, {
+        allowed: ['username'],
+        required: ['username'],
+      }),
+    ).rejects.toThrow('required manual-test variables: username');
+  });
+
+  test('prevents generation when a manual placeholder is missing', async () => {
+    let providerCalled = false;
+    const service = createTestAutomationService(
+      {
+        async findTestCase() {
+          return testCase;
+        },
+        async findTestCaseVersion() {
+          return sourceVersion;
+        },
+      } as never,
+      {
+        async require() {
+          return { projectId: 4 };
+        },
+      } as never,
+      {
+        async getAdapter() {
+          providerCalled = true;
+        },
+      } as never,
+      {
+        async get() {
+          return environment;
+        },
+        async listVariableMetadata() {
+          return [{ key: 'username', description: null, isSecret: false }];
+        },
+      } as never,
+    );
+
+    await expect(
+      service.generate(
+        {
+          testCaseId: 5,
+          sourceTestCaseVersionId: 12,
+          environmentId: 8,
+        },
+        2,
+      ),
+    ).rejects.toThrow('missing from the selected environment: password');
+    expect(providerCalled).toBe(false);
   });
 
   test('validates edited source again before acceptance', async () => {
@@ -234,7 +323,14 @@ describe('Playwright automation generation', () => {
       } as never,
       { async require() {} } as never,
       {} as never,
-      {} as never,
+      {
+        async listVariableMetadata() {
+          return [
+            { key: 'username', description: null, isSecret: false },
+            { key: 'password', description: null, isSecret: true },
+          ];
+        },
+      } as never,
     );
 
     await expect(

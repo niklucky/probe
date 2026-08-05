@@ -53,11 +53,11 @@ boundary for generated code.
 
 ## Secrets and artifacts
 
-Runtime test secrets are supplied to the worker through
-`RUNNER_TEST_SECRETS_JSON` and forwarded to Docker by environment-variable
-_name_. A job receives only names explicitly referenced as `process.env.NAME`
-in its accepted source; unrelated configured secrets are not injected. Values
-are never persisted in source, job rows, or process arguments.
+At execution time the worker loads encrypted variables from the job's selected
+environment, decrypts only names explicitly referenced as `process.env.NAME`
+in accepted source, and forwards them to Docker by environment-variable _name_.
+Unrelated environment variables are not loaded or injected. Values are never
+persisted in source, job rows, or process arguments.
 Logs and errors are redacted. Trace, screenshot, and video capture is disabled
 for executions with runtime secrets because browser artifacts can contain DOM
 and input values.
@@ -92,6 +92,6 @@ Worker:
 
 - `RUNNER_ID`, `RUNNER_POLL_MS`, `RUNNER_STALE_SECONDS`
 - `RUNNER_ARTIFACT_RETENTION_DAYS`
-- `RUNNER_TEST_SECRETS_JSON`
+- `ENVIRONMENT_VARIABLES_MASTER_KEY` (the same stable key used by the API)
 - `DATABASE_URL` and MinIO connection variables; `MINIO_SECRET_KEY` is required
   and has no default

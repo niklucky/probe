@@ -4,6 +4,7 @@ import {
   automationExecutionArtifacts,
   automationExecutionJobs,
   db,
+  environmentVariables,
   eq,
   inArray,
   lt,
@@ -95,6 +96,20 @@ export function createRunnerRepository(database: Database = db) {
       return database.query.automationExecutionJobs.findFirst({
         where: eq(automationExecutionJobs.id, id),
         with: { automation: true, environment: true, repairAttempts: true },
+      });
+    },
+    listEnvironmentVariables(environmentId: number, keys: string[]) {
+      if (!keys.length) return Promise.resolve([]);
+      return database.query.environmentVariables.findMany({
+        where: and(
+          eq(environmentVariables.environmentId, environmentId),
+          inArray(environmentVariables.key, keys),
+        ),
+        columns: {
+          key: true,
+          encryptedValue: true,
+          isSecret: true,
+        },
       });
     },
     async start(id: number, workerId: string) {

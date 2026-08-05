@@ -4,7 +4,6 @@ import {
   buildDockerArgs,
   classifyExecutionStatus,
   redactSecrets,
-  selectRuntimeSecrets,
   type ExecutionPayload,
 } from './executor';
 
@@ -30,7 +29,7 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      {},
+      { values: {}, secretNames: [] },
     );
     expect(args).toContain('--read-only');
     expect(args).toContain('--cap-drop=ALL');
@@ -53,7 +52,10 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { TEST_PASSWORD: secretValue },
+      {
+        values: { TEST_PASSWORD: secretValue },
+        secretNames: ['TEST_PASSWORD'],
+      },
     );
     expect(args).toContain('TEST_PASSWORD');
     expect(args.join(' ')).not.toContain(secretValue);
@@ -70,30 +72,27 @@ describe('isolated execution command', () => {
     expect(output).not.toContain(secretValue);
     expect(output).not.toContain(bearerValue);
     expect(output).toContain('[REDACTED]');
+    expect(redactSecrets('value=qa', { username: 'qa' })).toBe('value=qa');
   });
 
-  test('only injects secrets explicitly referenced by the accepted source', () => {
-    expect(
-      selectRuntimeSecrets(
-        "console.log(process.env.TEST_USER); use(process.env['TEST_PASSWORD'])",
-        {
-          TEST_USER: 'qa@example.test',
-          TEST_PASSWORD: 'private',
-          OTHER_PROJECT_TOKEN: 'must-not-be-injected',
-        },
-      ),
-    ).toEqual({
-      TEST_PASSWORD: 'private',
-      TEST_USER: 'qa@example.test',
-    });
+  test('does not apply secret artifact policy to non-secret runtime values', () => {
+    const { args } = buildDockerArgs(
+      payload,
+      '/tmp/source.ts',
+      '/tmp/artifacts',
+      { values: { username: 'qa-user' }, secretNames: [] },
+    );
+    expect(args).toContain('username');
+    expect(args).toContain('HAS_TEST_SECRETS=false');
   });
 
   test('rejects unsafe secret environment variable names', () => {
     expect(() =>
       buildDockerArgs(payload, '/tmp/source.ts', '/tmp/artifacts', {
-        'BAD-NAME': 'secret',
+        values: { 'BAD-NAME': 'secret' },
+        secretNames: ['BAD-NAME'],
       }),
-    ).toThrow('Invalid test secret environment variable');
+    ).toThrow('Invalid test environment variable');
   });
 
   test('refuses Docker host, default bridge, and unconfigured network modes', () => {
@@ -106,7 +105,7 @@ describe('isolated execution command', () => {
           },
           '/tmp/source.ts',
           '/tmp/artifacts',
-          {},
+          { values: {}, secretNames: [] },
         ),
       ).toThrow('dedicated egress-controlled Docker network');
     }

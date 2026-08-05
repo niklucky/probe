@@ -197,6 +197,21 @@ export function createEnvironmentService(
       );
     },
 
+    async listVariableMetadata(environmentId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: environmentId },
+        'read',
+      );
+      return (await repository.listVariables(environmentId)).map(
+        ({ key, description, isSecret }) => ({
+          key,
+          description,
+          isSecret,
+        }),
+      );
+    },
+
     async createVariable(
       input: CreateEnvironmentVariableInput,
       userId: number,

@@ -1,14 +1,18 @@
 import { Client } from 'minio';
 import { basename } from 'node:path';
+import { extractAutomationEnvironmentReferences } from '@probe/shared/automation-environment';
 import { runnerConfig } from './config';
 import {
   artifactMetadata,
   cleanupAbandonedExecution,
   executeInContainer,
   listArtifactFiles,
-  selectRuntimeSecrets,
   stat,
 } from './executor';
+import {
+  resolveRuntimeEnvironment,
+  RuntimeEnvironmentError,
+} from './environment-variables';
 import {
   createRunnerRepository,
   isRunnableExecutionSnapshot,
@@ -79,20 +83,55 @@ async function runClaimedJob(jobId: number) {
   }
   if (!(await repository.start(jobId, runnerConfig.RUNNER_ID))) return;
 
-  const result = await executeInContainer(
-    payload,
-    selectRuntimeSecrets(
-      payload.automation.source,
-      runnerConfig.RUNNER_TEST_SECRETS_JSON,
-    ),
-    {
-      heartbeat: async () =>
-        Boolean(
-          (await repository.heartbeat(jobId, runnerConfig.RUNNER_ID))
-            ?.cancellationRequestedAt,
-        ),
-    },
-  );
+  const { references: sourceReferences } =
+    extractAutomationEnvironmentReferences(payload.automation.source);
+  const references = sourceReferences
+    .filter((name) => name !== 'BASE_URL')
+    .sort();
+  let runtimeEnvironment: ReturnType<typeof resolveRuntimeEnvironment>;
+  try {
+    const variables = await repository.listEnvironmentVariables(
+      payload.environmentId,
+      references,
+    );
+    runtimeEnvironment = resolveRuntimeEnvironment(
+      references,
+      variables,
+      payload.environmentId,
+      runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
+    );
+  } catch (error) {
+    if (!(error instanceof RuntimeEnvironmentError)) {
+      console.error(
+        `Failed to load environment variables for execution ${jobId}`,
+        error,
+      );
+    }
+    const message =
+      error instanceof RuntimeEnvironmentError
+        ? error.message
+        : 'Execution environment variables could not be loaded';
+    await repository.finish(jobId, runnerConfig.RUNNER_ID, {
+      status: 'infrastructure_error',
+      errorCode:
+        error instanceof RuntimeEnvironmentError
+          ? error.code
+          : 'ENVIRONMENT_VARIABLE_LOAD_FAILED',
+      errorMessage: message,
+      structuredLogs: [
+        { at: new Date().toISOString(), level: 'error', message },
+      ],
+    });
+    return;
+  }
+
+  const result = await executeInContainer(payload, runtimeEnvironment, {
+    heartbeat: async () =>
+      Boolean(
+        (await repository.heartbeat(jobId, runnerConfig.RUNNER_ID))
+          ?.cancellationRequestedAt,
+      ),
+  });
   try {
     await uploadArtifacts(
       jobId,
