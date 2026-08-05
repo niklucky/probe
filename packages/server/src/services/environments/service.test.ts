@@ -11,13 +11,46 @@ function fixture(
 ) {
   let nextId = 1;
   const records: Array<Record<string, any>> = [];
-  const environment = { id: 7, projectId: 2 };
+  const cookies: Array<Record<string, any>> = [];
+  const environment = {
+    id: 7,
+    projectId: 2,
+    baseUrl: 'https://staging.example.test',
+  };
   const methods = {
     async find(id: number) {
       return id === environment.id ? environment : undefined;
     },
     async listVariables(environmentId: number) {
       return records.filter((record) => record.environmentId === environmentId);
+    },
+    async listCookies(environmentId: number) {
+      return cookies.filter((cookie) => cookie.environmentId === environmentId);
+    },
+    async findCookie(id: number) {
+      return cookies.find((cookie) => cookie.id === id);
+    },
+    async createCookie(values: Record<string, any>) {
+      const now = new Date();
+      const cookie = {
+        id: nextId++,
+        createdAt: now,
+        updatedAt: now,
+        ...values,
+      };
+      cookies.push(cookie);
+      return cookie;
+    },
+    async updateCookie(id: number, values: Record<string, any>) {
+      const cookie = cookies.find((candidate) => candidate.id === id);
+      if (!cookie) return undefined;
+      Object.assign(cookie, values, { updatedAt: new Date() });
+      return cookie;
+    },
+    async deleteCookie(id: number) {
+      const index = cookies.findIndex((cookie) => cookie.id === id);
+      if (index === -1) return undefined;
+      return cookies.splice(index, 1)[0];
     },
     async findVariable(id: number) {
       return records.find((record) => record.id === id);
@@ -70,7 +103,7 @@ function fixture(
     authorization as never,
     createEnvironmentVariableCipher(Buffer.alloc(32, 12).toString('base64')),
   );
-  return { service, records };
+  return { service, records, cookies };
 }
 
 describe('environment variable service', () => {
@@ -245,5 +278,52 @@ describe('environment variable service', () => {
       value: null,
       valueStatus: 'secret',
     });
+  });
+});
+
+describe('environment cookie service', () => {
+  test('stores and returns templates without materializing resolved values', async () => {
+    const { service, cookies } = fixture();
+    const created = await service.createCookie(
+      {
+        environmentId: 7,
+        name: 'session_id',
+        valueTemplate: '{{session_id}}',
+        domain: null,
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+        expiresAt: null,
+        enabled: true,
+      },
+      3,
+    );
+
+    expect(created.valueTemplate).toBe('{{session_id}}');
+    expect(JSON.stringify(created)).not.toContain('resolved-session');
+    expect(cookies[0]).not.toHaveProperty('value');
+    expect(await service.listCookies(7, 3)).toEqual([created]);
+  });
+
+  test('rejects cookie domains outside the environment host policy', async () => {
+    const { service } = fixture();
+    await expect(
+      service.createCookie(
+        {
+          environmentId: 7,
+          name: 'session_id',
+          valueTemplate: '{{session_id}}',
+          domain: 'unrelated.example.test',
+          path: '/',
+          httpOnly: true,
+          secure: true,
+          sameSite: 'Lax',
+          expiresAt: null,
+          enabled: true,
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

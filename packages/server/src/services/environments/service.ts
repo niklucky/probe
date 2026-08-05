@@ -5,10 +5,13 @@ import {
 } from '@probe/shared/errors/app-error';
 import type {
   CreateEnvironmentInput,
+  CreateEnvironmentCookieInput,
   CreateEnvironmentVariableInput,
   UpdateEnvironmentInput,
+  UpdateEnvironmentCookieInput,
   UpdateEnvironmentVariableInput,
 } from '@probe/shared/schemas/environments';
+import { validateEnvironmentCookieDomain } from '@probe/shared/schemas/environments';
 import type { EnvironmentRepository } from '../../repositories/environments/repository';
 import type { AuthorizationService } from '../authorization/service';
 import type { EnvironmentVariableCipher } from './encryption';
@@ -156,6 +159,20 @@ export function createEnvironmentService(
         input.productId === undefined ? current.productId : input.productId;
       await requireProductInProject(productId ?? undefined, current.projectId);
       const { id, ...updates } = input;
+      if (updates.baseUrl) {
+        for (const cookie of await repository.listCookies(id)) {
+          try {
+            validateEnvironmentCookieDomain(cookie.domain, updates.baseUrl);
+          } catch (error) {
+            throw new AppError(
+              'BAD_REQUEST',
+              error instanceof Error
+                ? error.message
+                : 'Cookie domain is invalid',
+            );
+          }
+        }
+      }
       return repository.withTransaction(async (transactionRepository) => {
         if (updates.isDefault) {
           await transactionRepository.clearDefault(
@@ -195,6 +212,87 @@ export function createEnvironmentService(
       return Promise.all(
         (await repository.listVariables(environmentId)).map(publicVariable),
       );
+    },
+
+    async listCookies(environmentId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: environmentId },
+        'read',
+      );
+      return repository.listCookies(environmentId);
+    },
+
+    async createCookie(input: CreateEnvironmentCookieInput, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: input.environmentId },
+        'author',
+      );
+      const environment = await repository.find(input.environmentId);
+      if (!environment)
+        throw new AppError('NOT_FOUND', 'Environment not found');
+      try {
+        validateEnvironmentCookieDomain(input.domain, environment.baseUrl);
+      } catch (error) {
+        throw new AppError(
+          'BAD_REQUEST',
+          error instanceof Error ? error.message : 'Cookie domain is invalid',
+        );
+      }
+      return repository.createCookie({
+        ...input,
+        domain: input.domain ?? null,
+        expiresAt: input.expiresAt ?? null,
+        createdById: userId,
+      });
+    },
+
+    async updateCookie(input: UpdateEnvironmentCookieInput, userId: number) {
+      const current = await repository.findCookie(input.id);
+      if (!current) throw new AppError('NOT_FOUND', 'Resource not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: current.environmentId },
+        'author',
+      );
+      const environment = await repository.find(current.environmentId);
+      if (!environment) throw new AppError('NOT_FOUND', 'Resource not found');
+      const domain = input.domain === undefined ? current.domain : input.domain;
+      const sameSite = input.sameSite ?? current.sameSite;
+      const secure = input.secure ?? current.secure;
+      if (sameSite === 'None' && !secure) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'SameSite=None cookies must be secure',
+        );
+      }
+      try {
+        validateEnvironmentCookieDomain(domain, environment.baseUrl);
+      } catch (error) {
+        throw new AppError(
+          'BAD_REQUEST',
+          error instanceof Error ? error.message : 'Cookie domain is invalid',
+        );
+      }
+      const { id, ...updates } = input;
+      const cookie = await repository.updateCookie(id, updates);
+      if (!cookie) throw new AppError('NOT_FOUND', 'Resource not found');
+      return cookie;
+    },
+
+    async deleteCookie(id: number, userId: number) {
+      const cookie = await repository.findCookie(id);
+      if (!cookie) throw new AppError('NOT_FOUND', 'Resource not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: cookie.environmentId },
+        'author',
+      );
+      if (!(await repository.deleteCookie(id))) {
+        throw new AppError('NOT_FOUND', 'Resource not found');
+      }
+      return { success: true as const };
     },
 
     async listVariableMetadata(environmentId: number, userId: number) {

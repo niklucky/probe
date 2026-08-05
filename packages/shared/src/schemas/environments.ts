@@ -1,5 +1,9 @@
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
-import { environmentVariables, environments } from '@probe/db';
+import {
+  environmentCookies,
+  environmentVariables,
+  environments,
+} from '@probe/db';
 import { z } from 'zod';
 
 const environmentInsertSchema = createInsertSchema(environments);
@@ -114,7 +118,137 @@ export const environmentVariableIdInputSchema = z.object({
   id: z.number().int().positive(),
 });
 
+export const environmentCookieNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .regex(
+    /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/,
+    'Cookie name contains invalid characters',
+  );
+
+export const environmentCookieValueTemplateSchema = z
+  .string()
+  .min(1)
+  .max(50_000)
+  .refine(
+    (value) => extractEnvironmentVariableReferences(value).length > 0,
+    'Cookie value must reference at least one environment variable',
+  );
+
+const cookieDomainSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .transform((value) => value.replace(/^\./, '').toLowerCase())
+  .refine(
+    (value) =>
+      value === 'localhost' ||
+      /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(
+        value,
+      ),
+    'Cookie domain is invalid',
+  );
+
+const cookiePathSchema = z
+  .string()
+  .min(1)
+  .max(2_048)
+  .startsWith('/', 'Cookie path must start with /');
+
+export const environmentCookieSchema = createSelectSchema(
+  environmentCookies,
+).pick({
+  id: true,
+  environmentId: true,
+  name: true,
+  valueTemplate: true,
+  domain: true,
+  path: true,
+  httpOnly: true,
+  secure: true,
+  sameSite: true,
+  expiresAt: true,
+  enabled: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const listEnvironmentCookiesInputSchema = z.object({
+  environmentId: z.number().int().positive(),
+});
+
+const cookieDefinitionFields = z.object({
+  name: environmentCookieNameSchema,
+  valueTemplate: environmentCookieValueTemplateSchema,
+  domain: cookieDomainSchema.nullable().optional(),
+  path: cookiePathSchema.default('/'),
+  httpOnly: z.boolean().default(true),
+  secure: z.boolean().default(true),
+  sameSite: z.enum(['Strict', 'Lax', 'None']).default('Lax'),
+  expiresAt: z.coerce.date().nullable().optional(),
+  enabled: z.boolean().default(true),
+});
+
+export const createEnvironmentCookieInputSchema = cookieDefinitionFields
+  .extend({ environmentId: z.number().int().positive() })
+  .superRefine(validateCookieAttributeCombination);
+
+export const updateEnvironmentCookieInputSchema = cookieDefinitionFields
+  .partial()
+  .extend({ id: z.number().int().positive() })
+  .superRefine(validateCookieAttributeCombination);
+
+export const environmentCookieIdInputSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 const placeholderPattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+function validateCookieAttributeCombination(
+  value: { sameSite?: 'Strict' | 'Lax' | 'None'; secure?: boolean },
+  context: z.RefinementCtx,
+) {
+  if (value.sameSite === 'None' && value.secure === false) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['secure'],
+      message: 'SameSite=None cookies must be secure',
+    });
+  }
+}
+
+export function validateEnvironmentCookieDomain(
+  domain: string | null | undefined,
+  baseUrl: string,
+) {
+  if (!domain) return;
+  const hostname = new URL(baseUrl).hostname.toLowerCase();
+  if (domain.replace(/^\./, '').toLowerCase() !== hostname) {
+    throw new Error(
+      `Cookie domain must match the environment host ${hostname}`,
+    );
+  }
+}
+
+export function resolveEnvironmentTemplate(
+  template: string,
+  values: Record<string, string>,
+) {
+  const missing = extractEnvironmentVariableReferences(template).filter(
+    (key) => !(key in values),
+  );
+  if (missing.length) {
+    throw new Error(`Missing environment variables: ${missing.join(', ')}`);
+  }
+  return template.replace(
+    placeholderPattern,
+    (_match, key: string) => values[key]!,
+  );
+}
 
 export function extractEnvironmentVariableReferences(value: string) {
   return [
@@ -160,4 +294,10 @@ export type CreateEnvironmentVariableInput = z.infer<
 >;
 export type UpdateEnvironmentVariableInput = z.infer<
   typeof updateEnvironmentVariableInputSchema
+>;
+export type CreateEnvironmentCookieInput = z.infer<
+  typeof createEnvironmentCookieInputSchema
+>;
+export type UpdateEnvironmentCookieInput = z.infer<
+  typeof updateEnvironmentCookieInputSchema
 >;

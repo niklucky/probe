@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CheckCircle,
+  Cookie,
   Edit,
   KeyRound,
   Plus,
@@ -48,6 +49,20 @@ const emptyVariableForm = {
   description: '',
 };
 
+type CookieSameSite = 'Strict' | 'Lax' | 'None';
+
+const emptyCookieForm = {
+  name: '',
+  valueTemplate: '',
+  domain: '',
+  path: '/',
+  httpOnly: true,
+  secure: true,
+  sameSite: 'Lax' as CookieSameSite,
+  expiresAt: '',
+  enabled: true,
+};
+
 export function EnvironmentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
@@ -66,6 +81,13 @@ export function EnvironmentsPage() {
     useState(false);
   const [variableForm, setVariableForm] = useState(emptyVariableForm);
   const [variableError, setVariableError] = useState('');
+  const [cookiesEnvironment, setCookiesEnvironment] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [editingCookieId, setEditingCookieId] = useState<number | null>(null);
+  const [cookieForm, setCookieForm] = useState(emptyCookieForm);
+  const [cookieError, setCookieError] = useState('');
   const input = { projectId: id, productId };
 
   const { data: project } = trpc.projects.get.useQuery({ id });
@@ -77,6 +99,11 @@ export function EnvironmentsPage() {
   const { data: variables = [] } = trpc.environments.listVariables.useQuery(
     variablesInput,
     { enabled: Boolean(variablesEnvironment) },
+  );
+  const cookiesInput = { environmentId: cookiesEnvironment?.id ?? 0 };
+  const { data: cookies = [] } = trpc.environments.listCookies.useQuery(
+    cookiesInput,
+    { enabled: Boolean(cookiesEnvironment) },
   );
   const utils = trpc.useContext();
 
@@ -122,6 +149,31 @@ export function EnvironmentsPage() {
     onSuccess: refreshVariables,
     onError: (error) => setVariableError(error.message),
   });
+  const refreshCookies = () =>
+    utils.environments.listCookies.invalidate(cookiesInput);
+  const resetCookieEditor = () => {
+    setEditingCookieId(null);
+    setCookieForm(emptyCookieForm);
+    setCookieError('');
+  };
+  const createCookie = trpc.environments.createCookie.useMutation({
+    onSuccess: () => {
+      refreshCookies();
+      resetCookieEditor();
+    },
+    onError: (error) => setCookieError(error.message),
+  });
+  const updateCookie = trpc.environments.updateCookie.useMutation({
+    onSuccess: () => {
+      refreshCookies();
+      resetCookieEditor();
+    },
+    onError: (error) => setCookieError(error.message),
+  });
+  const deleteCookie = trpc.environments.deleteCookie.useMutation({
+    onSuccess: refreshCookies,
+    onError: (error) => setCookieError(error.message),
+  });
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -156,6 +208,21 @@ export function EnvironmentsPage() {
       ...variableForm,
       description: variableForm.description || undefined,
     });
+  };
+
+  const submitCookie = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!cookiesEnvironment) return;
+    const values = {
+      ...cookieForm,
+      domain: cookieForm.domain || null,
+      expiresAt: cookieForm.expiresAt ? new Date(cookieForm.expiresAt) : null,
+    };
+    if (editingCookieId) {
+      updateCookie.mutate({ id: editingCookieId, ...values });
+    } else {
+      createCookie.mutate({ environmentId: cookiesEnvironment.id, ...values });
+    }
   };
 
   const formFields = (
@@ -343,22 +410,38 @@ export function EnvironmentsPage() {
                 >
                   {environment.baseUrl}
                 </a>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setVariablesEnvironment({
-                      id: environment.id,
-                      name: environment.name,
-                    });
-                    setEditingVariableId(null);
-                    setVariableForm(emptyVariableForm);
-                    setVariableError('');
-                  }}
-                >
-                  <KeyRound className="mr-2 h-4 w-4" />
-                  Variables
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setVariablesEnvironment({
+                        id: environment.id,
+                        name: environment.name,
+                      });
+                      setEditingVariableId(null);
+                      setVariableForm(emptyVariableForm);
+                      setVariableError('');
+                    }}
+                  >
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Variables
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setCookiesEnvironment({
+                        id: environment.id,
+                        name: environment.name,
+                      });
+                      resetCookieEditor();
+                    }}
+                  >
+                    <Cookie className="mr-2 h-4 w-4" />
+                    Cookies
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -552,6 +635,225 @@ export function EnvironmentsPage() {
                     variant="ghost"
                     size="icon"
                     onClick={() => deleteVariable.mutate({ id: variable.id })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cookiesEnvironment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCookiesEnvironment(null);
+            resetCookieEditor();
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{cookiesEnvironment?.name} cookies</DialogTitle>
+            <DialogDescription>
+              Cookie values are templates such as{' '}
+              <code>{'{{session_id}}'}</code>. Resolved values are never stored
+              or returned by the API.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-4" onSubmit={submitCookie}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-name">Name</Label>
+                <Input
+                  id="cookie-name"
+                  value={cookieForm.name}
+                  onChange={(event) =>
+                    setCookieForm({ ...cookieForm, name: event.target.value })
+                  }
+                  placeholder="session_id"
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-value">Value template</Label>
+                <Input
+                  id="cookie-value"
+                  value={cookieForm.valueTemplate}
+                  onChange={(event) =>
+                    setCookieForm({
+                      ...cookieForm,
+                      valueTemplate: event.target.value,
+                    })
+                  }
+                  placeholder="{{session_id}}"
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-domain">Domain (optional)</Label>
+                <Input
+                  id="cookie-domain"
+                  value={cookieForm.domain}
+                  onChange={(event) =>
+                    setCookieForm({ ...cookieForm, domain: event.target.value })
+                  }
+                  placeholder="Defaults to the environment host"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-path">Path</Label>
+                <Input
+                  id="cookie-path"
+                  value={cookieForm.path}
+                  onChange={(event) =>
+                    setCookieForm({ ...cookieForm, path: event.target.value })
+                  }
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-same-site">SameSite</Label>
+                <select
+                  id="cookie-same-site"
+                  className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                  value={cookieForm.sameSite}
+                  onChange={(event) =>
+                    setCookieForm({
+                      ...cookieForm,
+                      sameSite: event.target.value as CookieSameSite,
+                    })
+                  }
+                >
+                  <option value="Strict">Strict</option>
+                  <option value="Lax">Lax</option>
+                  <option value="None">None</option>
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cookie-expiry">Expiry (optional)</Label>
+                <Input
+                  id="cookie-expiry"
+                  type="datetime-local"
+                  value={cookieForm.expiresAt}
+                  onChange={(event) =>
+                    setCookieForm({
+                      ...cookieForm,
+                      expiresAt: event.target.value,
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              {(
+                [
+                  ['cookie-http-only', 'httpOnly', 'HTTP only'],
+                  ['cookie-secure', 'secure', 'Secure'],
+                  ['cookie-enabled', 'enabled', 'Enabled'],
+                ] as const
+              ).map(([id, field, label]) => (
+                <div key={field} className="flex items-center gap-2">
+                  <Checkbox
+                    id={id}
+                    checked={cookieForm[field]}
+                    onCheckedChange={(checked) =>
+                      setCookieForm({
+                        ...cookieForm,
+                        [field]: checked === true,
+                      })
+                    }
+                  />
+                  <Label htmlFor={id}>{label}</Label>
+                </div>
+              ))}
+              <div className="ml-auto flex gap-2">
+                {editingCookieId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={resetCookieEditor}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  disabled={createCookie.isPending || updateCookie.isPending}
+                >
+                  {editingCookieId ? 'Save cookie' : 'Add cookie'}
+                </Button>
+              </div>
+            </div>
+          </form>
+
+          {cookieError && (
+            <p className="text-sm text-destructive">{cookieError}</p>
+          )}
+
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {cookies.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No cookies configured yet.
+              </p>
+            )}
+            {cookies.map((cookie) => (
+              <div
+                key={cookie.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <code className="font-medium">{cookie.name}</code>
+                    {!cookie.enabled && (
+                      <Badge variant="secondary">Disabled</Badge>
+                    )}
+                    {cookie.httpOnly && (
+                      <Badge variant="secondary">HTTP only</Badge>
+                    )}
+                    {cookie.secure && <Badge variant="secondary">Secure</Badge>}
+                  </div>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {cookie.valueTemplate} ·{' '}
+                    {cookie.domain ?? 'environment host'}
+                    {cookie.path} · SameSite={cookie.sameSite}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEditingCookieId(cookie.id);
+                      setCookieForm({
+                        name: cookie.name,
+                        valueTemplate: cookie.valueTemplate,
+                        domain: cookie.domain ?? '',
+                        path: cookie.path,
+                        httpOnly: cookie.httpOnly,
+                        secure: cookie.secure,
+                        sameSite: cookie.sameSite,
+                        expiresAt: cookie.expiresAt
+                          ? new Date(cookie.expiresAt)
+                              .toISOString()
+                              .slice(0, 16)
+                          : '',
+                        enabled: cookie.enabled,
+                      });
+                      setCookieError('');
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deleteCookie.mutate({ id: cookie.id })}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

@@ -283,6 +283,8 @@ export function createAutomationRepairService(
       settings: {
         browser: 'chromium' as const,
         captureVideo: session.sourceExecution.settings.captureVideo,
+        applyEnvironmentCookies:
+          session.sourceExecution.settings.applyEnvironmentCookies ?? true,
         runnerVersion: runner.version,
         containerImage: runner.containerImage,
         cpuLimit: runner.cpuLimit,

@@ -10,7 +10,9 @@ import {
   stat,
 } from './executor';
 import {
+  cookieVariableReferences,
   resolveRuntimeEnvironment,
+  resolveRuntimeCookies,
   RuntimeEnvironmentError,
 } from './environment-variables';
 import {
@@ -85,21 +87,35 @@ async function runClaimedJob(jobId: number) {
 
   const { references: sourceReferences } =
     extractAutomationEnvironmentReferences(payload.automation.source);
-  const references = sourceReferences
-    .filter((name) => name !== 'BASE_URL')
-    .sort();
-  let runtimeEnvironment: ReturnType<typeof resolveRuntimeEnvironment>;
+  let runtimeEnvironment: Parameters<typeof executeInContainer>[1];
   try {
+    const cookieDefinitions = payload.settings.applyEnvironmentCookies
+      ? await repository.listEnvironmentCookies(payload.environmentId)
+      : [];
+    const references = [
+      ...new Set([
+        ...sourceReferences.filter((name) => name !== 'BASE_URL'),
+        ...cookieVariableReferences(cookieDefinitions),
+      ]),
+    ].sort();
     const variables = await repository.listEnvironmentVariables(
       payload.environmentId,
       references,
     );
-    runtimeEnvironment = resolveRuntimeEnvironment(
+    const resolvedEnvironment = resolveRuntimeEnvironment(
       references,
       variables,
       payload.environmentId,
       runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
     );
+    runtimeEnvironment = {
+      ...resolvedEnvironment,
+      cookies: resolveRuntimeCookies(
+        cookieDefinitions,
+        payload.environment.baseUrl,
+        resolvedEnvironment.values,
+      ),
+    };
   } catch (error) {
     if (!(error instanceof RuntimeEnvironmentError)) {
       console.error(

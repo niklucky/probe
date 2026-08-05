@@ -61,6 +61,7 @@ export function createAutomationExecutionService(
         settings: {
           browser: 'chromium',
           captureVideo: input.captureVideo,
+          applyEnvironmentCookies: input.applyEnvironmentCookies,
           runnerVersion: runner.version,
           containerImage: runner.containerImage,
           cpuLimit: runner.cpuLimit,
@@ -120,7 +121,11 @@ export function createAutomationExecutionService(
       }
       return {
         url: publicizeStorageUrl(
-          await storage.presignedGetObject(bucketName, artifact.objectName, 300),
+          await storage.presignedGetObject(
+            bucketName,
+            artifact.objectName,
+            300,
+          ),
           serverEnv.MINIO_PUBLIC_URL,
         ),
         expiresInSeconds: 300,

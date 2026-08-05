@@ -1,13 +1,18 @@
 import {
   createEnvironmentInputSchema,
+  createEnvironmentCookieInputSchema,
   createEnvironmentVariableInputSchema,
   environmentIdInputSchema,
+  environmentCookieIdInputSchema,
+  environmentCookieSchema,
   environmentSchema,
   environmentVariableIdInputSchema,
   environmentVariableSchema,
   listEnvironmentVariablesInputSchema,
+  listEnvironmentCookiesInputSchema,
   listEnvironmentsInputSchema,
   updateEnvironmentInputSchema,
+  updateEnvironmentCookieInputSchema,
   updateEnvironmentVariableInputSchema,
 } from '@probe/shared/schemas/environments';
 import { z } from 'zod';
@@ -61,5 +66,29 @@ export const environmentsRouter = router({
     .output(z.object({ success: z.literal(true) }))
     .mutation(({ ctx, input }) =>
       ctx.services.environments.deleteVariable(input.id, ctx.user.id),
+    ),
+  listCookies: protectedProcedure
+    .input(listEnvironmentCookiesInputSchema)
+    .output(z.array(environmentCookieSchema))
+    .query(({ ctx, input }) =>
+      ctx.services.environments.listCookies(input.environmentId, ctx.user.id),
+    ),
+  createCookie: protectedProcedure
+    .input(createEnvironmentCookieInputSchema)
+    .output(environmentCookieSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.createCookie(input, ctx.user.id),
+    ),
+  updateCookie: protectedProcedure
+    .input(updateEnvironmentCookieInputSchema)
+    .output(environmentCookieSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.updateCookie(input, ctx.user.id),
+    ),
+  deleteCookie: protectedProcedure
+    .input(environmentCookieIdInputSchema)
+    .output(z.object({ success: z.literal(true) }))
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.deleteCookie(input.id, ctx.user.id),
     ),
 });

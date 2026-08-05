@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createCipheriv } from 'node:crypto';
 import {
+  cookieVariableReferences,
+  resolveRuntimeCookies,
   resolveRuntimeEnvironment,
   RuntimeEnvironmentError,
 } from './environment-variables';
@@ -104,5 +106,50 @@ describe('execution environment variables', () => {
     );
     expect(first.values.username).toBe('first');
     expect(second.values.username).toBe('second');
+  });
+});
+
+describe('execution environment cookies', () => {
+  const definition = {
+    name: 'session_id',
+    valueTemplate: 'session={{session_id}}',
+    domain: null,
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax' as const,
+    expiresAt: null,
+  };
+
+  test('resolves templates and safely infers the environment host', () => {
+    expect(cookieVariableReferences([definition])).toEqual(['session_id']);
+    expect(
+      resolveRuntimeCookies([definition], 'https://staging.example.test/app', {
+        session_id: 'private-cookie',
+      }),
+    ).toEqual([
+      {
+        name: 'session_id',
+        value: 'session=private-cookie',
+        domain: 'staging.example.test',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+  });
+
+  test('rejects unrelated domains and missing template values before launch', () => {
+    expect(() =>
+      resolveRuntimeCookies(
+        [{ ...definition, domain: 'unrelated.example.test' }],
+        'https://staging.example.test',
+        { session_id: 'value' },
+      ),
+    ).toThrow(RuntimeEnvironmentError);
+    expect(() =>
+      resolveRuntimeCookies([definition], 'https://staging.example.test', {}),
+    ).toThrow('Missing environment variables: session_id');
   });
 });

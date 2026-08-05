@@ -4,6 +4,7 @@ import {
   buildDockerArgs,
   classifyExecutionStatus,
   redactSecrets,
+  withEnvironmentCookieHook,
   type ExecutionPayload,
 } from './executor';
 
@@ -12,6 +13,7 @@ const payload: ExecutionPayload = {
   timeoutSeconds: 60,
   settings: {
     captureVideo: false,
+    applyEnvironmentCookies: true,
     containerImage: 'probe-playwright-runner:1',
     cpuLimit: 1,
     memoryMb: 512,
@@ -29,7 +31,7 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: {}, secretNames: [] },
+      { values: {}, secretNames: [], cookies: [] },
     );
     expect(args).toContain('--read-only');
     expect(args).toContain('--cap-drop=ALL');
@@ -55,11 +57,48 @@ describe('isolated execution command', () => {
       {
         values: { TEST_PASSWORD: secretValue },
         secretNames: ['TEST_PASSWORD'],
+        cookies: [],
       },
     );
     expect(args).toContain('TEST_PASSWORD');
     expect(args.join(' ')).not.toContain(secretValue);
     expect(args).toContain('HAS_TEST_SECRETS=true');
+  });
+
+  test('passes resolved cookies by environment name and applies them before tests', () => {
+    const cookieValue = 'private-cookie-value';
+    const runtime = {
+      values: {},
+      secretNames: [],
+      cookies: [
+        {
+          name: 'session_id',
+          value: cookieValue,
+          domain: 'staging.example.test',
+          path: '/',
+          httpOnly: true,
+          secure: true,
+          sameSite: 'Lax' as const,
+        },
+      ],
+    };
+    const { args } = buildDockerArgs(
+      payload,
+      '/tmp/source.ts',
+      '/tmp/artifacts',
+      runtime,
+    );
+    expect(args).toContain('PROBE_ENVIRONMENT_COOKIES');
+    expect(args).toContain('HAS_TEST_SECRETS=true');
+    expect(args.join(' ')).not.toContain(cookieValue);
+    const source = withEnvironmentCookieHook(
+      `test('opens', async ({ page }) => page.goto('/'));`,
+      true,
+    );
+    expect(source.indexOf('context.addCookies')).toBeLessThan(
+      source.indexOf("page.goto('/')"),
+    );
+    expect(source).not.toContain(cookieValue);
   });
 
   test('redacts runtime secrets and common bearer credentials from logs', () => {
@@ -73,6 +112,9 @@ describe('isolated execution command', () => {
     expect(output).not.toContain(bearerValue);
     expect(output).toContain('[REDACTED]');
     expect(redactSecrets('value=qa', { username: 'qa' })).toBe('value=qa');
+    expect(redactSecrets('cookie=x', { 'cookie:0:short': 'x' })).toBe(
+      'cookie=[REDACTED]',
+    );
   });
 
   test('does not apply secret artifact policy to non-secret runtime values', () => {
@@ -80,7 +122,7 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: { username: 'qa-user' }, secretNames: [] },
+      { values: { username: 'qa-user' }, secretNames: [], cookies: [] },
     );
     expect(args).toContain('username');
     expect(args).toContain('HAS_TEST_SECRETS=false');
@@ -91,6 +133,7 @@ describe('isolated execution command', () => {
       buildDockerArgs(payload, '/tmp/source.ts', '/tmp/artifacts', {
         values: { 'BAD-NAME': 'secret' },
         secretNames: ['BAD-NAME'],
+        cookies: [],
       }),
     ).toThrow('Invalid test environment variable');
   });
@@ -105,7 +148,7 @@ describe('isolated execution command', () => {
           },
           '/tmp/source.ts',
           '/tmp/artifacts',
-          { values: {}, secretNames: [] },
+          { values: {}, secretNames: [], cookies: [] },
         ),
       ).toThrow('dedicated egress-controlled Docker network');
     }
