@@ -2,6 +2,7 @@ import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import {
   environmentCookies,
   environmentHeaders,
+  environmentProfiles,
   environmentVariables,
   environments,
 } from '@probe/db';
@@ -328,6 +329,64 @@ export const environmentHeaderIdInputSchema = z.object({
   id: z.number().int().positive(),
 });
 
+const profileBindingIdsSchema = z.array(z.number().int().positive()).max(500);
+
+export const environmentProfileSchema = createSelectSchema(environmentProfiles)
+  .pick({
+    id: true,
+    environmentId: true,
+    name: true,
+    isAnonymous: true,
+    enabled: true,
+    revision: true,
+    createdById: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    variableIds: profileBindingIdsSchema,
+    cookieIds: profileBindingIdsSchema,
+    headerIds: profileBindingIdsSchema,
+  });
+
+export const listEnvironmentProfilesInputSchema = z.object({
+  environmentId: z.number().int().positive(),
+});
+
+const profileFields = z.object({
+  name: z.string().trim().min(1).max(255),
+  enabled: z.boolean().default(true),
+  variableIds: profileBindingIdsSchema.default([]),
+  cookieIds: profileBindingIdsSchema.default([]),
+  headerIds: profileBindingIdsSchema.default([]),
+});
+
+export const createEnvironmentProfileInputSchema = profileFields
+  .extend({
+    environmentId: z.number().int().positive(),
+    isAnonymous: z.boolean().default(false),
+  })
+  .superRefine((profile, context) => {
+    if (
+      profile.isAnonymous &&
+      (profile.cookieIds.length || profile.headerIds.length)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['isAnonymous'],
+        message: 'Anonymous profiles cannot include cookies or headers',
+      });
+    }
+  });
+
+export const updateEnvironmentProfileInputSchema = profileFields
+  .partial()
+  .extend({ id: z.number().int().positive() });
+
+export const environmentProfileIdInputSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 const placeholderPattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 function validateCookieAttributeCombination(
@@ -432,4 +491,10 @@ export type CreateEnvironmentHeaderInput = z.infer<
 >;
 export type UpdateEnvironmentHeaderInput = z.infer<
   typeof updateEnvironmentHeaderInputSchema
+>;
+export type CreateEnvironmentProfileInput = z.infer<
+  typeof createEnvironmentProfileInputSchema
+>;
+export type UpdateEnvironmentProfileInput = z.infer<
+  typeof updateEnvironmentProfileInputSchema
 >;

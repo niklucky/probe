@@ -96,6 +96,7 @@ export function createServices() {
     automationExecutions: createAutomationExecutionService(
       createAutomationExecutionRepository(),
       authorization,
+      environments,
       storage,
       serverEnv.RUNNER_ARTIFACT_BUCKET,
       runnerDefaults,

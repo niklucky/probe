@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createEnvironmentCookieInputSchema,
   createEnvironmentHeaderInputSchema,
+  createEnvironmentProfileInputSchema,
   environmentVariableKeySchema,
   extractEnvironmentVariableReferences,
   extractEnvironmentVariableReferencesFromValue,
@@ -42,6 +43,36 @@ describe('environment variable placeholders', () => {
   });
 });
 
+describe('environment profile definitions', () => {
+  const anonymous = {
+    environmentId: 1,
+    name: 'Anonymous',
+    isAnonymous: true,
+    enabled: true,
+    variableIds: [1],
+    cookieIds: [],
+    headerIds: [],
+  };
+
+  test('allows login variables but rejects browser authentication bindings for Anonymous', () => {
+    expect(
+      createEnvironmentProfileInputSchema.safeParse(anonymous).success,
+    ).toBe(true);
+    expect(
+      createEnvironmentProfileInputSchema.safeParse({
+        ...anonymous,
+        cookieIds: [2],
+      }).success,
+    ).toBe(false);
+    expect(
+      createEnvironmentProfileInputSchema.safeParse({
+        ...anonymous,
+        headerIds: [3],
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('environment header definitions', () => {
   const base = {
     environmentId: 1,
@@ -77,8 +108,7 @@ describe('environment header definitions', () => {
       'X-Probe-Internal',
     ]) {
       expect(
-        createEnvironmentHeaderInputSchema.safeParse({ ...base, name })
-          .success,
+        createEnvironmentHeaderInputSchema.safeParse({ ...base, name }).success,
       ).toBe(false);
     }
     expect(

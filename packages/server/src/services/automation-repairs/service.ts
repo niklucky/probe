@@ -278,6 +278,10 @@ export function createAutomationRepairService(
     return {
       projectId: session.projectId,
       environmentId: session.sourceExecution.environmentId,
+      environmentProfileId: session.sourceExecution.environmentProfileId,
+      environmentProfileName: session.sourceExecution.environmentProfileName,
+      environmentProfileRevision:
+        session.sourceExecution.environmentProfileRevision,
       requestedById: userId,
       timeoutSeconds: session.sourceExecution.timeoutSeconds,
       settings: {
@@ -404,6 +408,9 @@ export function createAutomationRepairService(
           testCaseId: previous.testCaseId,
           sourceTestCaseVersionId: previous.sourceTestCaseVersionId,
           environmentId: previous.environmentId,
+          environmentProfileId: previous.environmentProfileId,
+          environmentProfileName: previous.environmentProfileName,
+          environmentProfileRevision: previous.environmentProfileRevision,
           framework: 'playwright',
           language: 'typescript',
           status: validationError ? 'failed' : 'generated',

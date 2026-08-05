@@ -36,6 +36,9 @@ describe('abandoned execution recovery', () => {
 describe('execution snapshot validation', () => {
   const payload = {
     environmentId: 9,
+    environmentProfileId: 4,
+    environmentProfileRevision: 2,
+    environmentProfile: { environmentId: 9, revision: 2, enabled: true },
     automation: { id: 7, environmentId: 9, status: 'generated' },
   };
 
@@ -70,6 +73,30 @@ describe('execution snapshot validation', () => {
           status: 'accepted',
           environmentId: 10,
         },
+      }),
+    ).toBe(false);
+  });
+
+  test('rejects missing, disabled, or stale profiles without fallback', () => {
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfile: null,
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(false);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfile: { ...payload.environmentProfile, enabled: false },
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(false);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfileRevision: 1,
+        automation: { ...payload.automation, status: 'accepted' },
       }),
     ).toBe(false);
   });

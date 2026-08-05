@@ -4,9 +4,9 @@ import {
   automationExecutionArtifacts,
   automationExecutionJobs,
   db,
-  environmentCookies,
-  environmentHeaders,
-  environmentVariables,
+  environmentProfileVariables,
+  environmentProfileCookies,
+  environmentProfileHeaders,
   eq,
   inArray,
   lt,
@@ -41,6 +41,13 @@ export function staleRecoveryValues(job: {
 
 export function isRunnableExecutionSnapshot(payload: {
   environmentId: number;
+  environmentProfileId: number | null;
+  environmentProfileRevision: number | null;
+  environmentProfile?: {
+    environmentId: number;
+    revision: number;
+    enabled: boolean;
+  } | null;
   automation: { id: number; environmentId: number; status: string };
   repairAttempts?: Array<{
     candidateAutomationId: number;
@@ -48,6 +55,15 @@ export function isRunnableExecutionSnapshot(payload: {
   }>;
 }) {
   if (payload.automation.environmentId !== payload.environmentId) return false;
+  if (
+    !payload.environmentProfileId ||
+    !payload.environmentProfile ||
+    !payload.environmentProfile.enabled ||
+    payload.environmentProfile.environmentId !== payload.environmentId ||
+    payload.environmentProfile.revision !== payload.environmentProfileRevision
+  ) {
+    return false;
+  }
   if (payload.automation.status === 'accepted') return true;
   return (
     payload.automation.status === 'generated' &&
@@ -97,55 +113,85 @@ export function createRunnerRepository(database: Database = db) {
     getPayload(id: number) {
       return database.query.automationExecutionJobs.findFirst({
         where: eq(automationExecutionJobs.id, id),
-        with: { automation: true, environment: true, repairAttempts: true },
+        with: {
+          automation: true,
+          environment: true,
+          environmentProfile: true,
+          repairAttempts: true,
+        },
       });
     },
-    listEnvironmentVariables(environmentId: number, keys: string[]) {
+    async listEnvironmentVariables(profileId: number, keys: string[]) {
       if (!keys.length) return Promise.resolve([]);
-      return database.query.environmentVariables.findMany({
-        where: and(
-          eq(environmentVariables.environmentId, environmentId),
-          inArray(environmentVariables.key, keys),
-        ),
-        columns: {
-          key: true,
-          encryptedValue: true,
-          isSecret: true,
+      const rows = await database.query.environmentProfileVariables.findMany({
+        where: eq(environmentProfileVariables.profileId, profileId),
+        with: {
+          variable: {
+            columns: {
+              key: true,
+              encryptedValue: true,
+              isSecret: true,
+            },
+          },
         },
       });
+      const selected = new Set(keys);
+      return rows
+        .map(({ variable }) => variable)
+        .filter((variable) => selected.has(variable.key));
     },
-    listEnvironmentCookies(environmentId: number) {
-      return database.query.environmentCookies.findMany({
-        where: and(
-          eq(environmentCookies.environmentId, environmentId),
-          eq(environmentCookies.enabled, true),
-        ),
-        columns: {
-          name: true,
-          valueTemplate: true,
-          domain: true,
-          path: true,
-          httpOnly: true,
-          secure: true,
-          sameSite: true,
-          expiresAt: true,
+    async listEnvironmentCookies(profileId: number) {
+      const rows = await database.query.environmentProfileCookies.findMany({
+        where: eq(environmentProfileCookies.profileId, profileId),
+        with: {
+          cookie: {
+            columns: {
+              name: true,
+              valueTemplate: true,
+              domain: true,
+              path: true,
+              httpOnly: true,
+              secure: true,
+              sameSite: true,
+              expiresAt: true,
+              enabled: true,
+            },
+          },
         },
-        orderBy: (table, { asc }) => [asc(table.name), asc(table.path)],
       });
+      return rows
+        .map(({ cookie }) => cookie)
+        .filter(({ enabled }) => enabled)
+        .map(({ enabled: _enabled, ...cookie }) => cookie)
+        .sort((left, right) =>
+          `${left.name}:${left.path}`.localeCompare(
+            `${right.name}:${right.path}`,
+          ),
+        );
     },
-    listEnvironmentHeaders(environmentId: number) {
-      return database.query.environmentHeaders.findMany({
-        where: and(
-          eq(environmentHeaders.environmentId, environmentId),
-          eq(environmentHeaders.enabled, true),
-        ),
-        columns: {
-          name: true,
-          valueTemplate: true,
-          origin: true,
+    async listEnvironmentHeaders(profileId: number) {
+      const rows = await database.query.environmentProfileHeaders.findMany({
+        where: eq(environmentProfileHeaders.profileId, profileId),
+        with: {
+          header: {
+            columns: {
+              name: true,
+              valueTemplate: true,
+              origin: true,
+              enabled: true,
+            },
+          },
         },
-        orderBy: (table, { asc }) => [asc(table.name), asc(table.origin)],
       });
+      return rows
+        .map(({ header }) => header)
+        .filter(({ enabled }) => enabled)
+        .map(({ enabled: _enabled, ...header }) => header)
+        .sort((left, right) =>
+          `${left.name}:${left.origin}`.localeCompare(
+            `${right.name}:${right.origin}`,
+          ),
+        );
     },
     async start(id: number, workerId: string) {
       const now = new Date();

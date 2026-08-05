@@ -27,6 +27,7 @@ export function automationPrompt(
     expectedResult: string;
   },
   environment: { name: string; type: string; baseUrl: string },
+  profile: { name: string; isAnonymous: boolean },
   variables: Array<{
     key: string;
     description: string | null;
@@ -35,6 +36,7 @@ export function automationPrompt(
 ) {
   return [
     `Target environment:\n${JSON.stringify({ name: environment.name, type: environment.type, baseUrl: environment.baseUrl })}`,
+    `Selected browser profile:\n${JSON.stringify({ name: profile.name, anonymous: profile.isAnonymous })}`,
     `Referenced environment variable metadata (values are intentionally omitted):\n${JSON.stringify(variables)}`,
     `Required placeholder mappings:\n${variables
       .map(({ key }) => `{{${key}}} => process.env.${key}`)

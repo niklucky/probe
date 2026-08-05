@@ -29,6 +29,7 @@ function bindRepository(database: Database) {
         with: {
           testCase: true,
           environment: true,
+          environmentProfile: true,
           sourceTestCaseVersion: true,
         },
       });
@@ -36,7 +37,11 @@ function bindRepository(database: Database) {
     list(testCaseId: number) {
       return database.query.testAutomations.findMany({
         where: eq(testAutomations.testCaseId, testCaseId),
-        with: { environment: true, sourceTestCaseVersion: true },
+        with: {
+          environment: true,
+          environmentProfile: true,
+          sourceTestCaseVersion: true,
+        },
         orderBy: desc(testAutomations.versionNumber),
       });
     },

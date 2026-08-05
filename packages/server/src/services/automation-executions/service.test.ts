@@ -5,6 +5,7 @@ const automation = {
   id: 7,
   status: 'accepted' as const,
   environmentId: 9,
+  source: 'console.log(process.env.username)',
   testCase: {
     suite: {
       product: { projectId: 3 },
@@ -40,6 +41,19 @@ describe('automation execution API service', () => {
           return { projectId: 3, role: 'qa' };
         },
       } as never,
+      {
+        async getEnabledProfile() {
+          return {
+            id: 5,
+            environmentId: 9,
+            name: 'Authenticated User',
+            revision: 2,
+          };
+        },
+        async listProfileVariableMetadata() {
+          return [{ key: 'username' }];
+        },
+      } as never,
       {} as never,
       'private-artifacts',
       defaults,
@@ -48,6 +62,7 @@ describe('automation execution API service', () => {
     await service.queue(
       {
         automationId: 7,
+        environmentProfileId: 5,
         timeoutSeconds: 120,
         captureVideo: true,
         applyEnvironmentCookies: false,
@@ -60,6 +75,9 @@ describe('automation execution API service', () => {
       projectId: 3,
       automationId: 7,
       environmentId: 9,
+      environmentProfileId: 5,
+      environmentProfileName: 'Authenticated User',
+      environmentProfileRevision: 2,
       requestedById: 4,
       timeoutSeconds: 120,
       settings: {
@@ -98,6 +116,7 @@ describe('automation execution API service', () => {
         },
       } as never,
       { async requireProject() {} } as never,
+      {} as never,
       {} as never,
       'private-artifacts',
       defaults,

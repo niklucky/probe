@@ -7,6 +7,7 @@ export const generateTestAutomationInputSchema = z.object({
   testCaseId: z.number().int().positive(),
   sourceTestCaseVersionId: z.number().int().positive(),
   environmentId: z.number().int().positive(),
+  environmentProfileId: z.number().int().positive(),
   connectionId: aiConnectionReferenceSchema.optional(),
 });
 
@@ -29,6 +30,9 @@ export const testAutomationSchema = createSelectSchema(testAutomations)
     testCaseId: true,
     sourceTestCaseVersionId: true,
     environmentId: true,
+    environmentProfileId: true,
+    environmentProfileName: true,
+    environmentProfileRevision: true,
     versionNumber: true,
     framework: true,
     language: true,
@@ -51,6 +55,7 @@ export const testAutomationSchema = createSelectSchema(testAutomations)
   })
   .extend({
     stale: z.boolean(),
+    profileStale: z.boolean(),
     environmentName: z.string(),
     sourceVersionNumber: z.number().int().positive(),
   });

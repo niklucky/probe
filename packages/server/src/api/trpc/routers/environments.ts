@@ -3,6 +3,7 @@ import {
   createEnvironmentCookieInputSchema,
   createEnvironmentHeaderInputSchema,
   createEnvironmentVariableInputSchema,
+  createEnvironmentProfileInputSchema,
   environmentIdInputSchema,
   environmentCookieIdInputSchema,
   environmentCookieSchema,
@@ -11,14 +12,18 @@ import {
   environmentSchema,
   environmentVariableIdInputSchema,
   environmentVariableSchema,
+  environmentProfileIdInputSchema,
+  environmentProfileSchema,
   listEnvironmentVariablesInputSchema,
   listEnvironmentCookiesInputSchema,
   listEnvironmentHeadersInputSchema,
   listEnvironmentsInputSchema,
+  listEnvironmentProfilesInputSchema,
   updateEnvironmentInputSchema,
   updateEnvironmentCookieInputSchema,
   updateEnvironmentHeaderInputSchema,
   updateEnvironmentVariableInputSchema,
+  updateEnvironmentProfileInputSchema,
 } from '@probe/shared/schemas/environments';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../../../trpc';
@@ -47,6 +52,30 @@ export const environmentsRouter = router({
     .output(z.object({ success: z.literal(true) }))
     .mutation(({ ctx, input }) =>
       ctx.services.environments.delete(input.id, ctx.user.id),
+    ),
+  listProfiles: protectedProcedure
+    .input(listEnvironmentProfilesInputSchema)
+    .output(z.array(environmentProfileSchema))
+    .query(({ ctx, input }) =>
+      ctx.services.environments.listProfiles(input.environmentId, ctx.user.id),
+    ),
+  createProfile: protectedProcedure
+    .input(createEnvironmentProfileInputSchema)
+    .output(environmentProfileSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.createProfile(input, ctx.user.id),
+    ),
+  updateProfile: protectedProcedure
+    .input(updateEnvironmentProfileInputSchema)
+    .output(environmentProfileSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.updateProfile(input, ctx.user.id),
+    ),
+  deleteProfile: protectedProcedure
+    .input(environmentProfileIdInputSchema)
+    .output(z.object({ success: z.literal(true) }))
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.deleteProfile(input.id, ctx.user.id),
     ),
   listVariables: protectedProcedure
     .input(listEnvironmentVariablesInputSchema)

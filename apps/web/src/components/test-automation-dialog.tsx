@@ -47,6 +47,7 @@ export function TestAutomationDialog({
   canGenerate,
 }: TestAutomationDialogProps) {
   const [environmentId, setEnvironmentId] = useState('');
+  const [environmentProfileId, setEnvironmentProfileId] = useState('');
   const [connectionId, setConnectionId] = useState('');
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState('');
@@ -64,6 +65,10 @@ export function TestAutomationDialog({
     { scope: 'test-authoring' },
     { enabled: open },
   );
+  const { data: profiles = [] } = trpc.environments.listProfiles.useQuery(
+    { environmentId: Number(environmentId) || 0 },
+    { enabled: open && Boolean(environmentId) },
+  );
   const { data: automations = [] } = trpc.testAutomations.list.useQuery(
     { testCaseId },
     { enabled: open },
@@ -77,6 +82,10 @@ export function TestAutomationDialog({
       setEnvironmentId(String(preferred?.id ?? ''));
     }
   }, [environmentId, environments]);
+
+  useEffect(() => {
+    setEnvironmentProfileId('');
+  }, [environmentId]);
 
   useEffect(() => {
     if (!open) {
@@ -133,6 +142,7 @@ export function TestAutomationDialog({
       testCaseId,
       sourceTestCaseVersionId,
       environmentId: Number(environmentId),
+      environmentProfileId: Number(environmentProfileId),
       connectionId: selectedConnection,
     });
   };
@@ -160,7 +170,7 @@ export function TestAutomationDialog({
             </Alert>
           )}
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="automation-environment">Environment</Label>
               <select
@@ -174,6 +184,31 @@ export function TestAutomationDialog({
                   <option key={environment.id} value={environment.id}>
                     {environment.name} — {environment.baseUrl}
                     {environment.isDefault ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="automation-profile">Browser profile</Label>
+              <select
+                id="automation-profile"
+                className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                value={environmentProfileId}
+                onChange={(event) =>
+                  setEnvironmentProfileId(event.target.value)
+                }
+                disabled={!environmentId}
+              >
+                <option value="">Choose a profile</option>
+                {profiles.map((profile) => (
+                  <option
+                    key={profile.id}
+                    value={profile.id}
+                    disabled={!profile.enabled}
+                  >
+                    {profile.name}
+                    {profile.isAnonymous ? ' (no authentication)' : ''}
+                    {!profile.enabled ? ' (disabled)' : ''}
                   </option>
                 ))}
               </select>
@@ -230,7 +265,12 @@ export function TestAutomationDialog({
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={busy || !environmentId || !canGenerate}
+                  disabled={
+                    busy ||
+                    !environmentId ||
+                    !environmentProfileId ||
+                    !canGenerate
+                  }
                   onClick={requestGeneration}
                 >
                   <RefreshCw className="mr-2 h-4 w-4" />
@@ -249,7 +289,9 @@ export function TestAutomationDialog({
           ) : (
             <Button
               type="button"
-              disabled={busy || !environmentId || !canGenerate}
+              disabled={
+                busy || !environmentId || !environmentProfileId || !canGenerate
+              }
               onClick={requestGeneration}
             >
               <Code2 className="mr-2 h-4 w-4" />
@@ -284,8 +326,9 @@ export function TestAutomationDialog({
                       {automation.sourceVersionNumber}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {automation.environmentName} · {automation.provider}/
-                      {automation.model}
+                      {automation.environmentName} ·{' '}
+                      {automation.environmentProfileName ?? 'Legacy profile'} ·{' '}
+                      {automation.provider}/{automation.model}
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -330,6 +373,8 @@ export function TestAutomationDialog({
             {selectedAutomation?.status === 'accepted' && (
               <AutomationExecutionHistory
                 automationId={selectedAutomation.id}
+                environmentId={selectedAutomation.environmentId}
+                preferredProfileId={selectedAutomation.environmentProfileId}
               />
             )}
           </div>
@@ -354,18 +399,31 @@ const terminalStatuses = new Set([
 
 function AutomationExecutionHistory({
   automationId,
+  environmentId,
+  preferredProfileId,
 }: {
   automationId: number;
+  environmentId: number;
+  preferredProfileId: number | null;
 }) {
   const [error, setError] = useState('');
   const [captureVideo, setCaptureVideo] = useState(false);
   const [applyEnvironmentCookies, setApplyEnvironmentCookies] = useState(true);
   const [applyEnvironmentHeaders, setApplyEnvironmentHeaders] = useState(true);
+  const [profileId, setProfileId] = useState(
+    preferredProfileId ? String(preferredProfileId) : '',
+  );
   const utils = trpc.useContext();
   const { data: jobs = [] } = trpc.automationExecutions.list.useQuery(
     { automationId },
     { refetchInterval: 2000 },
   );
+  const { data: profiles = [] } = trpc.environments.listProfiles.useQuery({
+    environmentId,
+  });
+  useEffect(() => {
+    setProfileId(preferredProfileId ? String(preferredProfileId) : '');
+  }, [automationId, preferredProfileId]);
   const queue = trpc.automationExecutions.queue.useMutation({
     onSuccess: () => {
       setError('');
@@ -393,6 +451,24 @@ function AutomationExecutionHistory({
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <select
+            aria-label="Execution browser profile"
+            className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={profileId}
+            onChange={(event) => setProfileId(event.target.value)}
+          >
+            <option value="">Choose profile</option>
+            {profiles.map((profile) => (
+              <option
+                key={profile.id}
+                value={profile.id}
+                disabled={!profile.enabled}
+              >
+                {profile.name}
+                {!profile.enabled ? ' (disabled)' : ''}
+              </option>
+            ))}
+          </select>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
@@ -423,10 +499,11 @@ function AutomationExecutionHistory({
           </label>
           <Button
             size="sm"
-            disabled={queue.isPending}
+            disabled={queue.isPending || !profileId}
             onClick={() =>
               queue.mutate({
                 automationId,
+                environmentProfileId: Number(profileId),
                 timeoutSeconds: 300,
                 captureVideo,
                 applyEnvironmentCookies,
@@ -466,6 +543,9 @@ function AutomationExecutionHistory({
                 <p className="mt-1 text-xs text-muted-foreground">
                   Attempt {job.attempt}/{job.maxAttempts} · timeout{' '}
                   {job.timeoutSeconds}s
+                  {job.environmentProfileName
+                    ? ` · profile ${job.environmentProfileName}`
+                    : ''}
                   {job.resultSummary
                     ? ` · ${job.resultSummary.durationMs}ms`
                     : ''}
