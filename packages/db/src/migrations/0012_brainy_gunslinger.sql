@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "environment_cookies_definition_unique" ON "environment_cookies" USING btree ("environment_id","name",coalesce("domain", ''),"path");

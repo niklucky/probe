@@ -57,13 +57,21 @@ export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {
   ].sort();
 }
 
+export function runtimeSensitiveVariableNames(
+  secretNames: string[],
+  cookieReferences: string[],
+) {
+  return [...new Set([...secretNames, ...cookieReferences])];
+}
+
 export function resolveRuntimeCookies(
   cookies: StoredEnvironmentCookie[],
   baseUrl: string,
   values: Record<string, string>,
+  now = new Date(),
 ): RuntimeCookie[] {
-  const target = new URL(baseUrl);
   try {
+    const target = new URL(baseUrl);
     return cookies.map((cookie) => {
       environmentCookieNameSchema.parse(cookie.name);
       validateEnvironmentCookieDomain(cookie.domain, baseUrl);
@@ -74,7 +82,9 @@ export function resolveRuntimeCookies(
         throw new Error(`Cookie "${cookie.name}" has an invalid path`);
       }
       if (!['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
-        throw new Error(`Cookie "${cookie.name}" has an invalid SameSite value`);
+        throw new Error(
+          `Cookie "${cookie.name}" has an invalid SameSite value`,
+        );
       }
       if (cookie.sameSite === 'None' && !cookie.secure) {
         throw new Error(
@@ -84,9 +94,24 @@ export function resolveRuntimeCookies(
       const expires = cookie.expiresAt
         ? Math.floor(cookie.expiresAt.getTime() / 1000)
         : undefined;
+      if (
+        expires !== undefined &&
+        cookie.expiresAt!.getTime() <= now.getTime()
+      ) {
+        throw new Error(`Cookie "${cookie.name}" has expired`);
+      }
+      const value = resolveEnvironmentTemplate(cookie.valueTemplate, values);
+      if (!/^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/.test(value)) {
+        throw new Error(
+          `Cookie "${cookie.name}" contains characters that browsers do not allow`,
+        );
+      }
+      if (Buffer.byteLength(`${cookie.name}=${value}`, 'utf8') > 4_096) {
+        throw new Error(`Cookie "${cookie.name}" exceeds the 4096-byte limit`);
+      }
       return {
         name: cookie.name,
-        value: resolveEnvironmentTemplate(cookie.valueTemplate, values),
+        value,
         domain: cookie.domain ?? target.hostname,
         path: cookie.path,
         httpOnly: cookie.httpOnly,

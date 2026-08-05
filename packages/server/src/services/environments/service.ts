@@ -99,6 +99,17 @@ export function createEnvironmentService(
     }
   }
 
+  async function mapCookieConflict<T>(operation: () => Promise<T>) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictError('Cookie definition already exists');
+      }
+      throw error;
+    }
+  }
+
   async function requireUniqueVariableKey(
     environmentId: number,
     key: string,
@@ -240,12 +251,14 @@ export function createEnvironmentService(
           error instanceof Error ? error.message : 'Cookie domain is invalid',
         );
       }
-      return repository.createCookie({
-        ...input,
-        domain: input.domain ?? null,
-        expiresAt: input.expiresAt ?? null,
-        createdById: userId,
-      });
+      return mapCookieConflict(() =>
+        repository.createCookie({
+          ...input,
+          domain: input.domain ?? null,
+          expiresAt: input.expiresAt ?? null,
+          createdById: userId,
+        }),
+      );
     },
 
     async updateCookie(input: UpdateEnvironmentCookieInput, userId: number) {
@@ -276,7 +289,9 @@ export function createEnvironmentService(
         );
       }
       const { id, ...updates } = input;
-      const cookie = await repository.updateCookie(id, updates);
+      const cookie = await mapCookieConflict(() =>
+        repository.updateCookie(id, updates),
+      );
       if (!cookie) throw new AppError('NOT_FOUND', 'Resource not found');
       return cookie;
     },

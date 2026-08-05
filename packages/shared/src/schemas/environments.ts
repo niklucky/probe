@@ -131,7 +131,7 @@ export const environmentCookieNameSchema = z
 export const environmentCookieValueTemplateSchema = z
   .string()
   .min(1)
-  .max(50_000)
+  .max(4_096)
   .refine(
     (value) => extractEnvironmentVariableReferences(value).length > 0,
     'Cookie value must reference at least one environment variable',
@@ -227,9 +227,13 @@ export function validateEnvironmentCookieDomain(
 ) {
   if (!domain) return;
   const hostname = new URL(baseUrl).hostname.toLowerCase();
-  if (domain.replace(/^\./, '').toLowerCase() !== hostname) {
+  const normalizedDomain = domain.replace(/^\./, '').toLowerCase();
+  if (
+    normalizedDomain !== hostname &&
+    !hostname.endsWith(`.${normalizedDomain}`)
+  ) {
     throw new Error(
-      `Cookie domain must match the environment host ${hostname}`,
+      `Cookie domain must match or be a parent of the environment host ${hostname}`,
     );
   }
 }

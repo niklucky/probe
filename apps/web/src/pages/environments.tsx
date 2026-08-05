@@ -63,6 +63,14 @@ const emptyCookieForm = {
   enabled: true,
 };
 
+function formatDateTimeLocal(value: string | Date) {
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate(),
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function EnvironmentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
@@ -838,9 +846,7 @@ export function EnvironmentsPage() {
                         secure: cookie.secure,
                         sameSite: cookie.sameSite,
                         expiresAt: cookie.expiresAt
-                          ? new Date(cookie.expiresAt)
-                              .toISOString()
-                              .slice(0, 16)
+                          ? formatDateTimeLocal(cookie.expiresAt)
                           : '',
                         enabled: cookie.enabled,
                       });

@@ -13,6 +13,7 @@ import {
   cookieVariableReferences,
   resolveRuntimeEnvironment,
   resolveRuntimeCookies,
+  runtimeSensitiveVariableNames,
   RuntimeEnvironmentError,
 } from './environment-variables';
 import {
@@ -92,10 +93,11 @@ async function runClaimedJob(jobId: number) {
     const cookieDefinitions = payload.settings.applyEnvironmentCookies
       ? await repository.listEnvironmentCookies(payload.environmentId)
       : [];
+    const cookieReferences = cookieVariableReferences(cookieDefinitions);
     const references = [
       ...new Set([
         ...sourceReferences.filter((name) => name !== 'BASE_URL'),
-        ...cookieVariableReferences(cookieDefinitions),
+        ...cookieReferences,
       ]),
     ].sort();
     const variables = await repository.listEnvironmentVariables(
@@ -110,6 +112,12 @@ async function runClaimedJob(jobId: number) {
     );
     runtimeEnvironment = {
       ...resolvedEnvironment,
+      // Cookie-backed values are sensitive at runtime even if their variable
+      // metadata is not marked secret: the raw token must also be redacted.
+      secretNames: runtimeSensitiveVariableNames(
+        resolvedEnvironment.secretNames,
+        cookieReferences,
+      ),
       cookies: resolveRuntimeCookies(
         cookieDefinitions,
         payload.environment.baseUrl,

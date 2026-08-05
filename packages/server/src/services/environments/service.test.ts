@@ -15,11 +15,22 @@ function fixture(
   const environment = {
     id: 7,
     projectId: 2,
+    productId: null,
     baseUrl: 'https://staging.example.test',
+    isDefault: false,
   };
-  const methods = {
+  const methods: any = {
     async find(id: number) {
       return id === environment.id ? environment : undefined;
+    },
+    async update(id: number, values: Record<string, any>) {
+      if (id !== environment.id) return undefined;
+      Object.assign(environment, values);
+      return environment;
+    },
+    async clearDefault() {},
+    withTransaction<T>(operation: (repository: any) => Promise<T>) {
+      return operation(methods);
     },
     async listVariables(environmentId: number) {
       return records.filter((record) => record.environmentId === environmentId);
@@ -324,6 +335,52 @@ describe('environment cookie service', () => {
         },
         3,
       ),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  test('revalidates cookie domains when the environment base URL changes', async () => {
+    const { service } = fixture();
+    await service.createCookie(
+      {
+        environmentId: 7,
+        name: 'session_id',
+        valueTemplate: '{{session_id}}',
+        domain: 'example.test',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+        expiresAt: null,
+        enabled: true,
+      },
+      3,
+    );
+
+    await expect(
+      service.update({ id: 7, baseUrl: 'https://other.test' }, 3),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  test('validates merged attributes during partial cookie updates', async () => {
+    const { service } = fixture();
+    const cookie = await service.createCookie(
+      {
+        environmentId: 7,
+        name: 'session_id',
+        valueTemplate: '{{session_id}}',
+        domain: null,
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'None',
+        expiresAt: null,
+        enabled: true,
+      },
+      3,
+    );
+
+    await expect(
+      service.updateCookie({ id: cookie!.id, secure: false }, 3),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

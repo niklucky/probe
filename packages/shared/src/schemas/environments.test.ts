@@ -4,6 +4,7 @@ import {
   environmentVariableKeySchema,
   extractEnvironmentVariableReferences,
   extractEnvironmentVariableReferencesFromValue,
+  validateEnvironmentCookieDomain,
 } from './environments';
 
 describe('environment variable placeholders', () => {
@@ -68,5 +69,26 @@ describe('environment cookie definitions', () => {
         secure: false,
       }).success,
     ).toBe(false);
+    expect(
+      createEnvironmentCookieInputSchema.safeParse({
+        ...base,
+        valueTemplate: `{{session_id}}${'x'.repeat(4_096)}`,
+      }).success,
+    ).toBe(false);
+  });
+
+  test('allows exact and parent domains but rejects unrelated hosts', () => {
+    expect(() =>
+      validateEnvironmentCookieDomain(
+        'example.test',
+        'https://staging.example.test',
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateEnvironmentCookieDomain(
+        'evil-example.test',
+        'https://staging.example.test',
+      ),
+    ).toThrow('must match or be a parent');
   });
 });

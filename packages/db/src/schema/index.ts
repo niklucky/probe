@@ -258,6 +258,12 @@ export const environmentCookies = pgTable(
     environmentIndex: index('environment_cookies_environment_index').on(
       table.environmentId,
     ),
+    definitionUnique: uniqueIndex('environment_cookies_definition_unique').on(
+      table.environmentId,
+      table.name,
+      sql`coalesce(${table.domain}, '')`,
+      table.path,
+    ),
   }),
 );
 
