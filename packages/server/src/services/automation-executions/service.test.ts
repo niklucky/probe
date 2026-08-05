@@ -51,6 +51,7 @@ describe('automation execution API service', () => {
         timeoutSeconds: 120,
         captureVideo: true,
         applyEnvironmentCookies: false,
+        applyEnvironmentHeaders: false,
       },
       4,
     );
@@ -66,6 +67,7 @@ describe('automation execution API service', () => {
         containerImage: 'probe-playwright-runner:1',
         captureVideo: true,
         applyEnvironmentCookies: false,
+        applyEnvironmentHeaders: false,
       },
     });
     expect(writes[0]).not.toHaveProperty('source');

@@ -3,10 +3,33 @@ import {
   artifactMetadata,
   buildDockerArgs,
   classifyExecutionStatus,
+  environmentHeaderRouteHandlerSource,
   redactSecrets,
   withEnvironmentCookieHook,
+  withEnvironmentHeaderHook,
   type ExecutionPayload,
 } from './executor';
+
+type HeaderDefinition = { name: string; value: string; origin: string };
+type RouteHandler = (
+  route: {
+    request(): { url(): string; headers(): Record<string, string> };
+    continue(): Promise<void>;
+    fetch(options: {
+      headers: Record<string, string>;
+      maxRedirects: number;
+    }): Promise<object>;
+    fulfill(options: { response: object }): Promise<void>;
+    abort(code: string): Promise<void>;
+  },
+  definitions: HeaderDefinition[],
+) => Promise<void>;
+
+function compiledEnvironmentHeaderRouteHandler() {
+  return new Function(
+    `return (${environmentHeaderRouteHandlerSource});`,
+  )() as RouteHandler;
+}
 
 const payload: ExecutionPayload = {
   id: 42,
@@ -14,6 +37,7 @@ const payload: ExecutionPayload = {
   settings: {
     captureVideo: false,
     applyEnvironmentCookies: true,
+    applyEnvironmentHeaders: true,
     containerImage: 'probe-playwright-runner:1',
     cpuLimit: 1,
     memoryMb: 512,
@@ -31,7 +55,7 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: {}, secretNames: [], cookies: [] },
+      { values: {}, secretNames: [], cookies: [], headers: [] },
     );
     expect(args).toContain('--read-only');
     expect(args).toContain('--cap-drop=ALL');
@@ -58,6 +82,7 @@ describe('isolated execution command', () => {
         values: { TEST_PASSWORD: secretValue },
         secretNames: ['TEST_PASSWORD'],
         cookies: [],
+        headers: [],
       },
     );
     expect(args).toContain('TEST_PASSWORD');
@@ -81,6 +106,7 @@ describe('isolated execution command', () => {
           sameSite: 'Lax' as const,
         },
       ],
+      headers: [],
     };
     const { args } = buildDockerArgs(
       payload,
@@ -101,6 +127,137 @@ describe('isolated execution command', () => {
     expect(source).not.toContain(cookieValue);
   });
 
+  test('passes resolved headers by environment name and installs a per-request origin check', () => {
+    const headerValue = 'Bearer private-header-value';
+    const runtime = {
+      values: {},
+      secretNames: [],
+      cookies: [],
+      headers: [
+        {
+          name: 'Authorization',
+          value: headerValue,
+          origin: 'https://staging.example.test',
+        },
+      ],
+    };
+    const { args } = buildDockerArgs(
+      payload,
+      '/tmp/source.ts',
+      '/tmp/artifacts',
+      runtime,
+    );
+    expect(args).toContain('PROBE_ENVIRONMENT_HEADERS');
+    expect(args).toContain('HAS_TEST_SECRETS=true');
+    expect(args.join(' ')).not.toContain(headerValue);
+    const source = withEnvironmentHeaderHook(
+      `test('opens', async ({ page }) => page.goto('/'));`,
+      true,
+    );
+    expect(source).toContain("context.route('**/*'");
+    expect(source).toContain('new URL(request.url()).origin');
+    expect(source).toContain('header.origin === requestOrigin');
+    expect(source).toContain('maxRedirects: 0');
+    expect(source).toContain('route.fulfill({ response })');
+    expect(source).not.toContain(headerValue);
+  });
+
+  test('executes the serialized route hook for each redirect origin', async () => {
+    const handler = compiledEnvironmentHeaderRouteHandler();
+    const definitions = [
+      {
+        name: 'Authorization',
+        value: 'Bearer private-header-value',
+        origin: 'https://staging.example.test',
+      },
+    ];
+    const redirectResponse = { status: 302 };
+    let fetchOptions:
+      | { headers: Record<string, string>; maxRedirects: number }
+      | undefined;
+    let fulfilledResponse: object | undefined;
+    await handler(
+      {
+        request: () => ({
+          url: () => 'https://staging.example.test/start',
+          headers: () => ({ authorization: 'old-value', accept: '*/*' }),
+        }),
+        continue: async () => {
+          throw new Error('matching requests must not continue directly');
+        },
+        fetch: async (options) => {
+          fetchOptions = options;
+          return redirectResponse;
+        },
+        fulfill: async ({ response }) => {
+          fulfilledResponse = response;
+        },
+        abort: async () => {},
+      },
+      definitions,
+    );
+    expect(fetchOptions).toEqual({
+      headers: {
+        accept: '*/*',
+        Authorization: 'Bearer private-header-value',
+      },
+      maxRedirects: 0,
+    });
+    expect(fulfilledResponse).toBe(redirectResponse);
+
+    let redirectedRequestContinued = false;
+    await handler(
+      {
+        request: () => ({
+          url: () => 'https://identity.example.test/login',
+          headers: () => ({ accept: '*/*' }),
+        }),
+        continue: async () => {
+          redirectedRequestContinued = true;
+        },
+        fetch: async () => {
+          throw new Error('cross-origin redirects must not receive headers');
+        },
+        fulfill: async () => {},
+        abort: async () => {},
+      },
+      definitions,
+    );
+    expect(redirectedRequestContinued).toBe(true);
+  });
+
+  test('aborts the routed request and preserves fetch failures', async () => {
+    const handler = compiledEnvironmentHeaderRouteHandler();
+    const networkError = new Error('DNS lookup failed');
+    let abortCode: string | undefined;
+    await expect(
+      handler(
+        {
+          request: () => ({
+            url: () => 'https://staging.example.test/start',
+            headers: () => ({}),
+          }),
+          continue: async () => {},
+          fetch: async () => {
+            throw networkError;
+          },
+          fulfill: async () => {},
+          abort: async (code) => {
+            abortCode = code;
+          },
+        },
+        [
+          {
+            name: 'Authorization',
+            value: 'Bearer private-header-value',
+            origin: 'https://staging.example.test',
+          },
+        ],
+      ),
+    ).rejects.toBe(networkError);
+    expect(abortCode).toBe('failed');
+  });
+
   test('redacts runtime secrets and common bearer credentials from logs', () => {
     const secretValue = ['fixture', 'value'].join('-');
     const bearerValue = 'fixture'.repeat(3);
@@ -115,6 +272,9 @@ describe('isolated execution command', () => {
     expect(redactSecrets('cookie=x', { 'cookie:0:short': 'x' })).toBe(
       'cookie=[REDACTED]',
     );
+    expect(redactSecrets('header=x', { 'header:0:short': 'x' })).toBe(
+      'header=[REDACTED]',
+    );
   });
 
   test('does not apply secret artifact policy to non-secret runtime values', () => {
@@ -122,7 +282,12 @@ describe('isolated execution command', () => {
       payload,
       '/tmp/source.ts',
       '/tmp/artifacts',
-      { values: { username: 'qa-user' }, secretNames: [], cookies: [] },
+      {
+        values: { username: 'qa-user' },
+        secretNames: [],
+        cookies: [],
+        headers: [],
+      },
     );
     expect(args).toContain('username');
     expect(args).toContain('HAS_TEST_SECRETS=false');
@@ -134,6 +299,7 @@ describe('isolated execution command', () => {
         values: { 'BAD-NAME': 'secret' },
         secretNames: ['BAD-NAME'],
         cookies: [],
+        headers: [],
       }),
     ).toThrow('Invalid test environment variable');
   });
@@ -148,7 +314,7 @@ describe('isolated execution command', () => {
           },
           '/tmp/source.ts',
           '/tmp/artifacts',
-          { values: {}, secretNames: [], cookies: [] },
+          { values: {}, secretNames: [], cookies: [], headers: [] },
         ),
       ).toThrow('dedicated egress-controlled Docker network');
     }

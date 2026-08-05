@@ -6,9 +6,11 @@ import {
 import type {
   CreateEnvironmentInput,
   CreateEnvironmentCookieInput,
+  CreateEnvironmentHeaderInput,
   CreateEnvironmentVariableInput,
   UpdateEnvironmentInput,
   UpdateEnvironmentCookieInput,
+  UpdateEnvironmentHeaderInput,
   UpdateEnvironmentVariableInput,
 } from '@probe/shared/schemas/environments';
 import { validateEnvironmentCookieDomain } from '@probe/shared/schemas/environments';
@@ -105,6 +107,17 @@ export function createEnvironmentService(
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ConflictError('Cookie definition already exists');
+      }
+      throw error;
+    }
+  }
+
+  async function mapHeaderConflict<T>(operation: () => Promise<T>) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictError('Header definition already exists');
       }
       throw error;
     }
@@ -305,6 +318,64 @@ export function createEnvironmentService(
         'author',
       );
       if (!(await repository.deleteCookie(id))) {
+        throw new AppError('NOT_FOUND', 'Resource not found');
+      }
+      return { success: true as const };
+    },
+
+    async listHeaders(environmentId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: environmentId },
+        'read',
+      );
+      return repository.listHeaders(environmentId);
+    },
+
+    async createHeader(input: CreateEnvironmentHeaderInput, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: input.environmentId },
+        'author',
+      );
+      const environment = await repository.find(input.environmentId);
+      if (!environment) {
+        throw new AppError('NOT_FOUND', 'Environment not found');
+      }
+      return mapHeaderConflict(() =>
+        repository.createHeader({
+          ...input,
+          origin: input.origin ?? new URL(environment.baseUrl).origin,
+          createdById: userId,
+        }),
+      );
+    },
+
+    async updateHeader(input: UpdateEnvironmentHeaderInput, userId: number) {
+      const current = await repository.findHeader(input.id);
+      if (!current) throw new AppError('NOT_FOUND', 'Resource not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: current.environmentId },
+        'author',
+      );
+      const { id, ...updates } = input;
+      const header = await mapHeaderConflict(() =>
+        repository.updateHeader(id, updates),
+      );
+      if (!header) throw new AppError('NOT_FOUND', 'Resource not found');
+      return header;
+    },
+
+    async deleteHeader(id: number, userId: number) {
+      const header = await repository.findHeader(id);
+      if (!header) throw new AppError('NOT_FOUND', 'Resource not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: header.environmentId },
+        'author',
+      );
+      if (!(await repository.deleteHeader(id))) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return { success: true as const };

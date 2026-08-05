@@ -1,18 +1,23 @@
 import {
   createEnvironmentInputSchema,
   createEnvironmentCookieInputSchema,
+  createEnvironmentHeaderInputSchema,
   createEnvironmentVariableInputSchema,
   environmentIdInputSchema,
   environmentCookieIdInputSchema,
   environmentCookieSchema,
+  environmentHeaderIdInputSchema,
+  environmentHeaderSchema,
   environmentSchema,
   environmentVariableIdInputSchema,
   environmentVariableSchema,
   listEnvironmentVariablesInputSchema,
   listEnvironmentCookiesInputSchema,
+  listEnvironmentHeadersInputSchema,
   listEnvironmentsInputSchema,
   updateEnvironmentInputSchema,
   updateEnvironmentCookieInputSchema,
+  updateEnvironmentHeaderInputSchema,
   updateEnvironmentVariableInputSchema,
 } from '@probe/shared/schemas/environments';
 import { z } from 'zod';
@@ -90,5 +95,29 @@ export const environmentsRouter = router({
     .output(z.object({ success: z.literal(true) }))
     .mutation(({ ctx, input }) =>
       ctx.services.environments.deleteCookie(input.id, ctx.user.id),
+    ),
+  listHeaders: protectedProcedure
+    .input(listEnvironmentHeadersInputSchema)
+    .output(z.array(environmentHeaderSchema))
+    .query(({ ctx, input }) =>
+      ctx.services.environments.listHeaders(input.environmentId, ctx.user.id),
+    ),
+  createHeader: protectedProcedure
+    .input(createEnvironmentHeaderInputSchema)
+    .output(environmentHeaderSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.createHeader(input, ctx.user.id),
+    ),
+  updateHeader: protectedProcedure
+    .input(updateEnvironmentHeaderInputSchema)
+    .output(environmentHeaderSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.updateHeader(input, ctx.user.id),
+    ),
+  deleteHeader: protectedProcedure
+    .input(environmentHeaderIdInputSchema)
+    .output(z.object({ success: z.literal(true) }))
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.deleteHeader(input.id, ctx.user.id),
     ),
 });

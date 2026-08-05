@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { createCipheriv } from 'node:crypto';
 import {
   cookieVariableReferences,
+  headerVariableReferences,
   resolveRuntimeCookies,
   resolveRuntimeEnvironment,
+  resolveRuntimeHeaders,
   RuntimeEnvironmentError,
   runtimeSensitiveVariableNames,
 } from './environment-variables';
@@ -107,6 +109,60 @@ describe('execution environment variables', () => {
     );
     expect(first.values.username).toBe('first');
     expect(second.values.username).toBe('second');
+  });
+});
+
+describe('execution environment headers', () => {
+  const definition = {
+    name: 'Authorization',
+    valueTemplate: 'Bearer {{access_token}}',
+    origin: 'https://staging.example.test',
+  };
+
+  test('resolves templates and treats referenced values as sensitive', () => {
+    expect(headerVariableReferences([definition])).toEqual(['access_token']);
+    expect(
+      resolveRuntimeHeaders([definition], { access_token: 'private-token' }),
+    ).toEqual([
+      {
+        name: 'Authorization',
+        value: 'Bearer private-token',
+        origin: 'https://staging.example.test',
+      },
+    ]);
+    expect(
+      runtimeSensitiveVariableNames(
+        ['password'],
+        ['session_id'],
+        ['access_token'],
+      ),
+    ).toEqual(['password', 'session_id', 'access_token']);
+  });
+
+  test('rejects reserved names, malformed origins, controls, and missing values', () => {
+    expect(() =>
+      resolveRuntimeHeaders([{ ...definition, name: 'Host' }], {
+        access_token: 'value',
+      }),
+    ).toThrow('reserved or managed');
+    expect(() =>
+      resolveRuntimeHeaders(
+        [{ ...definition, origin: 'https://staging.example.test/' }],
+        { access_token: 'value' },
+      ),
+    ).toThrow('non-canonical origin');
+    expect(() =>
+      resolveRuntimeHeaders([definition], { access_token: 'line\nbreak' }),
+    ).toThrow('disallowed control character');
+    expect(() =>
+      resolveRuntimeHeaders([definition], { access_token: 'null\0byte' }),
+    ).toThrow('disallowed control character');
+    expect(() =>
+      resolveRuntimeHeaders([definition], { access_token: 'tab\tallowed' }),
+    ).not.toThrow();
+    expect(() => resolveRuntimeHeaders([definition], {})).toThrow(
+      'Missing environment variables: access_token',
+    );
   });
 });
 

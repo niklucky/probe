@@ -17,6 +17,7 @@ export interface ExecutionPayload {
   settings: {
     captureVideo: boolean;
     applyEnvironmentCookies: boolean;
+    applyEnvironmentHeaders: boolean;
     containerImage: string;
     cpuLimit: number;
     memoryMb: number;
@@ -57,6 +58,11 @@ export interface RuntimeEnvironment {
     sameSite: 'Strict' | 'Lax' | 'None';
     expires?: number;
   }>;
+  headers: Array<{
+    name: string;
+    value: string;
+    origin: string;
+  }>;
 }
 
 interface ExecutionOutcome {
@@ -93,7 +99,12 @@ export function redactSecrets(value: string, secrets: Record<string, string>) {
   for (const [name, secret] of Object.entries(secrets).sort(
     (left, right) => right[1].length - left[1].length,
   )) {
-    if (secret && (secret.length >= 3 || name.startsWith('cookie:')))
+    if (
+      secret &&
+      (secret.length >= 3 ||
+        name.startsWith('cookie:') ||
+        name.startsWith('header:'))
+    )
       sanitized = sanitized.split(secret).join('[REDACTED]');
   }
   return sanitized
@@ -150,12 +161,17 @@ export function buildDockerArgs(
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',
-    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length || runtimeEnvironment.cookies.length ? 'true' : 'false'}`,
+    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length || runtimeEnvironment.cookies.length || runtimeEnvironment.headers.length ? 'true' : 'false'}`,
   ];
   if (runtimeEnvironment.cookies.length) {
     // The value is inherited from the runner process and never appears in the
     // Docker command, queue data, generated source, or persisted results.
     args.push('--env', 'PROBE_ENVIRONMENT_COOKIES');
+  }
+  if (runtimeEnvironment.headers.length) {
+    // As with cookies, Docker inherits this value from the runner process so
+    // resolved header values never appear in process arguments.
+    args.push('--env', 'PROBE_ENVIRONMENT_HEADERS');
   }
   for (const name of Object.keys(runtimeEnvironment.values).sort()) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
@@ -175,6 +191,50 @@ export function withEnvironmentCookieHook(source: string, hasCookies: boolean) {
 __probeCookieTest.beforeEach(async ({ context }) => {
   const cookies = JSON.parse(process.env.PROBE_ENVIRONMENT_COOKIES ?? '[]');
   await context.addCookies(cookies);
+});
+${source}`;
+}
+
+// Kept as one self-contained JavaScript expression so the behavioral tests
+// execute the exact route handler serialized into generated Playwright source.
+export const environmentHeaderRouteHandlerSource = `async (route, definitions) => {
+  const request = route.request();
+  const requestOrigin = new URL(request.url()).origin;
+  const matching = definitions.filter((header) => header.origin === requestOrigin);
+  if (!matching.length) {
+    await route.continue();
+    return;
+  }
+  const headers = { ...request.headers() };
+  for (const header of matching) {
+    for (const existingName of Object.keys(headers)) {
+      if (existingName.toLowerCase() === header.name.toLowerCase()) {
+        delete headers[existingName];
+      }
+    }
+    headers[header.name] = header.value;
+  }
+  try {
+    // Fetch exactly one hop. Fulfilling a redirect response makes the browser
+    // initiate the next URL as a fresh routed request, where origin matching is
+    // evaluated again instead of carrying these headers across the redirect.
+    const response = await route.fetch({ headers, maxRedirects: 0 });
+    await route.fulfill({ response });
+  } catch (error) {
+    await route.abort('failed').catch(() => undefined);
+    throw error;
+  }
+}`;
+
+export function withEnvironmentHeaderHook(source: string, hasHeaders: boolean) {
+  if (!hasHeaders) return source;
+  return `import { test as __probeHeaderTest } from '@playwright/test';
+const __probeHandleHeaderRoute = ${environmentHeaderRouteHandlerSource};
+__probeHeaderTest.beforeEach(async ({ context }) => {
+  const definitions = JSON.parse(process.env.PROBE_ENVIRONMENT_HEADERS ?? '[]');
+  await context.route('**/*', (route) =>
+    __probeHandleHeaderRoute(route, definitions),
+  );
 });
 ${source}`;
 }
@@ -238,9 +298,12 @@ export async function executeInContainer(
   // unprivileged pwuser read a file owned by the host runner on Linux.
   await writeFile(
     sourcePath,
-    withEnvironmentCookieHook(
-      payload.automation.source,
-      runtimeEnvironment.cookies.length > 0,
+    withEnvironmentHeaderHook(
+      withEnvironmentCookieHook(
+        payload.automation.source,
+        runtimeEnvironment.cookies.length > 0,
+      ),
+      runtimeEnvironment.headers.length > 0,
     ),
     { mode: 0o444 },
   );
@@ -257,6 +320,10 @@ export async function executeInContainer(
     ...runtimeEnvironment.cookies.map(
       (cookie, index) =>
         [`cookie:${index}:${cookie.name}`, cookie.value] as const,
+    ),
+    ...runtimeEnvironment.headers.map(
+      (header, index) =>
+        [`header:${index}:${header.name}`, header.value] as const,
     ),
   ]);
 
@@ -284,6 +351,13 @@ export async function executeInContainer(
           ? {
               PROBE_ENVIRONMENT_COOKIES: JSON.stringify(
                 runtimeEnvironment.cookies,
+              ),
+            }
+          : {}),
+        ...(runtimeEnvironment.headers.length
+          ? {
+              PROBE_ENVIRONMENT_HEADERS: JSON.stringify(
+                runtimeEnvironment.headers,
               ),
             }
           : {}),

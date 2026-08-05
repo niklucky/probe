@@ -55,12 +55,20 @@ boundary for generated code.
 
 At execution time the worker loads encrypted variables from the job's selected
 environment, decrypts only names explicitly referenced as `process.env.NAME`
-in accepted source, and forwards them to Docker by environment-variable _name_.
-Unrelated environment variables are not loaded or injected. Values are never
-persisted in source, job rows, or process arguments.
+in accepted source or environment cookie/header templates, and forwards them to
+Docker by environment-variable _name_. Unrelated environment variables are not
+loaded or injected. Values are never persisted in source, job rows, or process
+arguments.
 Logs and errors are redacted. Trace, screenshot, and video capture is disabled
 for executions with runtime secrets because browser artifacts can contain DOM
 and input values.
+
+Environment header templates are resolved during runner preflight and passed to
+the container through inherited process environment only. The Playwright hook
+matches the exact request origin and fetches one redirect hop at a time, so a
+cross-origin redirect is evaluated as a new request and cannot inherit custom
+headers. Browser- and transport-managed header names are rejected before a
+definition is stored and again before execution.
 
 Artifacts are written to the private `signal-runner-artifacts` bucket. The API
 checks project membership before issuing a five-minute download URL; object

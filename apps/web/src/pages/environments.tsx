@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  Braces,
   CheckCircle,
   Cookie,
   Edit,
@@ -63,6 +64,13 @@ const emptyCookieForm = {
   enabled: true,
 };
 
+const emptyHeaderForm = (origin = '') => ({
+  name: '',
+  valueTemplate: '',
+  origin,
+  enabled: true,
+});
+
 function formatDateTimeLocal(value: string | Date) {
   const date = new Date(value);
   const pad = (part: number) => String(part).padStart(2, '0');
@@ -96,6 +104,14 @@ export function EnvironmentsPage() {
   const [editingCookieId, setEditingCookieId] = useState<number | null>(null);
   const [cookieForm, setCookieForm] = useState(emptyCookieForm);
   const [cookieError, setCookieError] = useState('');
+  const [headersEnvironment, setHeadersEnvironment] = useState<{
+    id: number;
+    name: string;
+    baseOrigin: string;
+  } | null>(null);
+  const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
+  const [headerForm, setHeaderForm] = useState(emptyHeaderForm());
+  const [headerError, setHeaderError] = useState('');
   const input = { projectId: id, productId };
 
   const { data: project } = trpc.projects.get.useQuery({ id });
@@ -112,6 +128,11 @@ export function EnvironmentsPage() {
   const { data: cookies = [] } = trpc.environments.listCookies.useQuery(
     cookiesInput,
     { enabled: Boolean(cookiesEnvironment) },
+  );
+  const headersInput = { environmentId: headersEnvironment?.id ?? 0 };
+  const { data: headers = [] } = trpc.environments.listHeaders.useQuery(
+    headersInput,
+    { enabled: Boolean(headersEnvironment) },
   );
   const utils = trpc.useContext();
 
@@ -182,6 +203,31 @@ export function EnvironmentsPage() {
     onSuccess: refreshCookies,
     onError: (error) => setCookieError(error.message),
   });
+  const refreshHeaders = () =>
+    utils.environments.listHeaders.invalidate(headersInput);
+  const resetHeaderEditor = () => {
+    setEditingHeaderId(null);
+    setHeaderForm(emptyHeaderForm(headersEnvironment?.baseOrigin));
+    setHeaderError('');
+  };
+  const createHeader = trpc.environments.createHeader.useMutation({
+    onSuccess: () => {
+      refreshHeaders();
+      resetHeaderEditor();
+    },
+    onError: (error) => setHeaderError(error.message),
+  });
+  const updateHeader = trpc.environments.updateHeader.useMutation({
+    onSuccess: () => {
+      refreshHeaders();
+      resetHeaderEditor();
+    },
+    onError: (error) => setHeaderError(error.message),
+  });
+  const deleteHeader = trpc.environments.deleteHeader.useMutation({
+    onSuccess: refreshHeaders,
+    onError: (error) => setHeaderError(error.message),
+  });
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -230,6 +276,49 @@ export function EnvironmentsPage() {
       updateCookie.mutate({ id: editingCookieId, ...values });
     } else {
       createCookie.mutate({ environmentId: cookiesEnvironment.id, ...values });
+    }
+  };
+
+  const submitHeader = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!headersEnvironment) return;
+    let canonicalOrigin: string;
+    try {
+      const origin = new URL(headerForm.origin);
+      if (
+        !['http:', 'https:'].includes(origin.protocol) ||
+        origin.username ||
+        origin.password
+      ) {
+        throw new Error('invalid origin');
+      }
+      canonicalOrigin = origin.origin;
+    } catch {
+      setHeaderError('Header origin must be a valid HTTP(S) origin');
+      return;
+    }
+    if (headerForm.origin.trim() !== canonicalOrigin) {
+      setHeaderError(
+        `Header origin must be canonical and contain no path, query, or fragment. Use ${canonicalOrigin}`,
+      );
+      return;
+    }
+    if (editingHeaderId) {
+      updateHeader.mutate({
+        id: editingHeaderId,
+        name: headerForm.name,
+        origin: canonicalOrigin,
+        enabled: headerForm.enabled,
+        ...(headerForm.valueTemplate
+          ? { valueTemplate: headerForm.valueTemplate }
+          : {}),
+      });
+    } else {
+      createHeader.mutate({
+        environmentId: headersEnvironment.id,
+        ...headerForm,
+        origin: canonicalOrigin,
+      });
     }
   };
 
@@ -448,6 +537,24 @@ export function EnvironmentsPage() {
                   >
                     <Cookie className="mr-2 h-4 w-4" />
                     Cookies
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const baseOrigin = new URL(environment.baseUrl).origin;
+                      setHeadersEnvironment({
+                        id: environment.id,
+                        name: environment.name,
+                        baseOrigin,
+                      });
+                      setEditingHeaderId(null);
+                      setHeaderForm(emptyHeaderForm(baseOrigin));
+                      setHeaderError('');
+                    }}
+                  >
+                    <Braces className="mr-2 h-4 w-4" />
+                    Headers
                   </Button>
                 </div>
               </div>
@@ -860,6 +967,169 @@ export function EnvironmentsPage() {
                     variant="ghost"
                     size="icon"
                     onClick={() => deleteCookie.mutate({ id: cookie.id })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={headersEnvironment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setHeadersEnvironment(null);
+            setEditingHeaderId(null);
+            setHeaderForm(emptyHeaderForm());
+            setHeaderError('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{headersEnvironment?.name} headers</DialogTitle>
+            <DialogDescription>
+              Values must use environment templates such as{' '}
+              <code>{'Bearer {{access_token}}'}</code>. Resolved values are
+              injected only for the exact configured origin and are never
+              stored or returned by the API.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-4" onSubmit={submitHeader}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="header-name">Name</Label>
+                <Input
+                  id="header-name"
+                  value={headerForm.name}
+                  onChange={(event) =>
+                    setHeaderForm({ ...headerForm, name: event.target.value })
+                  }
+                  placeholder="Authorization"
+                  required
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="header-value">Value template</Label>
+                <Input
+                  id="header-value"
+                  type="password"
+                  value={headerForm.valueTemplate}
+                  onChange={(event) =>
+                    setHeaderForm({
+                      ...headerForm,
+                      valueTemplate: event.target.value,
+                    })
+                  }
+                  placeholder={
+                    editingHeaderId
+                      ? 'Leave blank to keep the existing template'
+                      : 'Bearer {{access_token}}'
+                  }
+                  required={!editingHeaderId}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="header-origin">Exact request origin</Label>
+              <Input
+                id="header-origin"
+                type="url"
+                value={headerForm.origin}
+                onChange={(event) =>
+                  setHeaderForm({ ...headerForm, origin: event.target.value })
+                }
+                placeholder={headersEnvironment?.baseOrigin}
+                required
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="header-enabled"
+                  checked={headerForm.enabled}
+                  onCheckedChange={(checked) =>
+                    setHeaderForm({
+                      ...headerForm,
+                      enabled: checked === true,
+                    })
+                  }
+                />
+                <Label htmlFor="header-enabled">Enabled</Label>
+              </div>
+              <div className="flex gap-2">
+                {editingHeaderId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={resetHeaderEditor}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  disabled={createHeader.isPending || updateHeader.isPending}
+                >
+                  {editingHeaderId ? 'Save header' : 'Add header'}
+                </Button>
+              </div>
+            </div>
+          </form>
+
+          {headerError && (
+            <p className="text-sm text-destructive">{headerError}</p>
+          )}
+
+          <div className="max-h-72 space-y-2 overflow-y-auto">
+            {headers.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No custom headers configured yet.
+              </p>
+            )}
+            {headers.map((header) => (
+              <div
+                key={header.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-3"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <code className="font-medium">{header.name}</code>
+                    {!header.enabled && (
+                      <Badge variant="secondary">Disabled</Badge>
+                    )}
+                  </div>
+                  <p className="truncate text-sm text-muted-foreground">
+                    •••••••• · {header.origin}
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEditingHeaderId(header.id);
+                      setHeaderForm({
+                        name: header.name,
+                        valueTemplate: '',
+                        origin: header.origin,
+                        enabled: header.enabled,
+                      });
+                      setHeaderError('');
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deleteHeader.mutate({ id: header.id })}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

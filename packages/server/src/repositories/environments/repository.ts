@@ -2,6 +2,7 @@ import {
   and,
   db,
   environmentCookies,
+  environmentHeaders,
   environmentVariables,
   environments,
   eq,
@@ -70,6 +71,42 @@ function bindEnvironmentRepository(database: Database) {
         .where(eq(environmentCookies.id, id))
         .returning();
       return cookie;
+    },
+    listHeaders(environmentId: number) {
+      return database.query.environmentHeaders.findMany({
+        where: eq(environmentHeaders.environmentId, environmentId),
+        orderBy: (table, { asc }) => [asc(table.name), asc(table.origin)],
+      });
+    },
+    findHeader(id: number) {
+      return database.query.environmentHeaders.findFirst({
+        where: eq(environmentHeaders.id, id),
+      });
+    },
+    async createHeader(values: typeof environmentHeaders.$inferInsert) {
+      const [header] = await database
+        .insert(environmentHeaders)
+        .values(values)
+        .returning();
+      return header;
+    },
+    async updateHeader(
+      id: number,
+      values: Partial<typeof environmentHeaders.$inferInsert>,
+    ) {
+      const [header] = await database
+        .update(environmentHeaders)
+        .set({ ...values, updatedAt: new Date() })
+        .where(eq(environmentHeaders.id, id))
+        .returning();
+      return header;
+    },
+    async deleteHeader(id: number) {
+      const [header] = await database
+        .delete(environmentHeaders)
+        .where(eq(environmentHeaders.id, id))
+        .returning();
+      return header;
     },
     listVariables(environmentId: number) {
       return database.query.environmentVariables.findMany({

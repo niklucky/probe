@@ -285,6 +285,8 @@ export function createAutomationRepairService(
         captureVideo: session.sourceExecution.settings.captureVideo,
         applyEnvironmentCookies:
           session.sourceExecution.settings.applyEnvironmentCookies ?? true,
+        applyEnvironmentHeaders:
+          session.sourceExecution.settings.applyEnvironmentHeaders ?? true,
         runnerVersion: runner.version,
         containerImage: runner.containerImage,
         cpuLimit: runner.cpuLimit,

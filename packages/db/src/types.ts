@@ -3,6 +3,7 @@ import type {
   aiConnections,
   environments,
   environmentCookies,
+  environmentHeaders,
   environmentVariables,
   files,
   products,
@@ -32,6 +33,8 @@ export type CreateEnvironmentVariable =
   typeof environmentVariables.$inferInsert;
 export type EnvironmentCookie = typeof environmentCookies.$inferSelect;
 export type CreateEnvironmentCookie = typeof environmentCookies.$inferInsert;
+export type EnvironmentHeader = typeof environmentHeaders.$inferSelect;
+export type CreateEnvironmentHeader = typeof environmentHeaders.$inferInsert;
 export type AiConnection = typeof aiConnections.$inferSelect;
 export type CreateAiConnection = typeof aiConnections.$inferInsert;
 export type AiConnectionAuditLog = typeof aiConnectionAuditLogs.$inferSelect;

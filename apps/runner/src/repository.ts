@@ -5,6 +5,7 @@ import {
   automationExecutionJobs,
   db,
   environmentCookies,
+  environmentHeaders,
   environmentVariables,
   eq,
   inArray,
@@ -130,6 +131,20 @@ export function createRunnerRepository(database: Database = db) {
           expiresAt: true,
         },
         orderBy: (table, { asc }) => [asc(table.name), asc(table.path)],
+      });
+    },
+    listEnvironmentHeaders(environmentId: number) {
+      return database.query.environmentHeaders.findMany({
+        where: and(
+          eq(environmentHeaders.environmentId, environmentId),
+          eq(environmentHeaders.enabled, true),
+        ),
+        columns: {
+          name: true,
+          valueTemplate: true,
+          origin: true,
+        },
+        orderBy: (table, { asc }) => [asc(table.name), asc(table.origin)],
       });
     },
     async start(id: number, workerId: string) {

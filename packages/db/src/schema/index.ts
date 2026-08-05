@@ -267,6 +267,37 @@ export const environmentCookies = pgTable(
   }),
 );
 
+// Header values remain variable-backed templates here. Resolved values exist
+// only in runner memory immediately before browser execution.
+export const environmentHeaders = pgTable(
+  'environment_headers',
+  {
+    id: serial('id').primaryKey(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    valueTemplate: text('value_template').notNull(),
+    origin: varchar('origin', { length: 2048 }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    environmentIndex: index('environment_headers_environment_index').on(
+      table.environmentId,
+    ),
+    definitionUnique: uniqueIndex('environment_headers_definition_unique').on(
+      table.environmentId,
+      sql`lower(${table.name})`,
+      table.origin,
+    ),
+  }),
+);
+
 // AI credentials and custom headers are stored only in encryptedConfig. Never
 // select this table directly for API responses; the server repository redacts it.
 export const aiConnections = pgTable(
@@ -589,6 +620,7 @@ export const automationExecutionJobs = pgTable(
         browser: 'chromium';
         captureVideo: boolean;
         applyEnvironmentCookies: boolean;
+        applyEnvironmentHeaders: boolean;
         runnerVersion: string;
         containerImage: string;
         cpuLimit: number;
@@ -900,6 +932,7 @@ export const environmentsRelations = relations(
     automationExecutionJobs: many(automationExecutionJobs),
     variables: many(environmentVariables),
     cookies: many(environmentCookies),
+    headers: many(environmentHeaders),
   }),
 );
 
@@ -926,6 +959,20 @@ export const environmentCookiesRelations = relations(
     }),
     createdBy: one(users, {
       fields: [environmentCookies.createdById],
+      references: [users.id],
+    }),
+  }),
+);
+
+export const environmentHeadersRelations = relations(
+  environmentHeaders,
+  ({ one }) => ({
+    environment: one(environments, {
+      fields: [environmentHeaders.environmentId],
+      references: [environments.id],
+    }),
+    createdBy: one(users, {
+      fields: [environmentHeaders.createdById],
       references: [users.id],
     }),
   }),
