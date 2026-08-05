@@ -3,11 +3,33 @@ import {
   artifactMetadata,
   buildDockerArgs,
   classifyExecutionStatus,
+  environmentHeaderRouteHandlerSource,
   redactSecrets,
   withEnvironmentCookieHook,
   withEnvironmentHeaderHook,
   type ExecutionPayload,
 } from './executor';
+
+type HeaderDefinition = { name: string; value: string; origin: string };
+type RouteHandler = (
+  route: {
+    request(): { url(): string; headers(): Record<string, string> };
+    continue(): Promise<void>;
+    fetch(options: {
+      headers: Record<string, string>;
+      maxRedirects: number;
+    }): Promise<object>;
+    fulfill(options: { response: object }): Promise<void>;
+    abort(code: string): Promise<void>;
+  },
+  definitions: HeaderDefinition[],
+) => Promise<void>;
+
+function compiledEnvironmentHeaderRouteHandler() {
+  return new Function(
+    `return (${environmentHeaderRouteHandlerSource});`,
+  )() as RouteHandler;
+}
 
 const payload: ExecutionPayload = {
   id: 42,
@@ -138,6 +160,102 @@ describe('isolated execution command', () => {
     expect(source).toContain('maxRedirects: 0');
     expect(source).toContain('route.fulfill({ response })');
     expect(source).not.toContain(headerValue);
+  });
+
+  test('executes the serialized route hook for each redirect origin', async () => {
+    const handler = compiledEnvironmentHeaderRouteHandler();
+    const definitions = [
+      {
+        name: 'Authorization',
+        value: 'Bearer private-header-value',
+        origin: 'https://staging.example.test',
+      },
+    ];
+    const redirectResponse = { status: 302 };
+    let fetchOptions:
+      | { headers: Record<string, string>; maxRedirects: number }
+      | undefined;
+    let fulfilledResponse: object | undefined;
+    await handler(
+      {
+        request: () => ({
+          url: () => 'https://staging.example.test/start',
+          headers: () => ({ authorization: 'old-value', accept: '*/*' }),
+        }),
+        continue: async () => {
+          throw new Error('matching requests must not continue directly');
+        },
+        fetch: async (options) => {
+          fetchOptions = options;
+          return redirectResponse;
+        },
+        fulfill: async ({ response }) => {
+          fulfilledResponse = response;
+        },
+        abort: async () => {},
+      },
+      definitions,
+    );
+    expect(fetchOptions).toEqual({
+      headers: {
+        accept: '*/*',
+        Authorization: 'Bearer private-header-value',
+      },
+      maxRedirects: 0,
+    });
+    expect(fulfilledResponse).toBe(redirectResponse);
+
+    let redirectedRequestContinued = false;
+    await handler(
+      {
+        request: () => ({
+          url: () => 'https://identity.example.test/login',
+          headers: () => ({ accept: '*/*' }),
+        }),
+        continue: async () => {
+          redirectedRequestContinued = true;
+        },
+        fetch: async () => {
+          throw new Error('cross-origin redirects must not receive headers');
+        },
+        fulfill: async () => {},
+        abort: async () => {},
+      },
+      definitions,
+    );
+    expect(redirectedRequestContinued).toBe(true);
+  });
+
+  test('aborts the routed request and preserves fetch failures', async () => {
+    const handler = compiledEnvironmentHeaderRouteHandler();
+    const networkError = new Error('DNS lookup failed');
+    let abortCode: string | undefined;
+    await expect(
+      handler(
+        {
+          request: () => ({
+            url: () => 'https://staging.example.test/start',
+            headers: () => ({}),
+          }),
+          continue: async () => {},
+          fetch: async () => {
+            throw networkError;
+          },
+          fulfill: async () => {},
+          abort: async (code) => {
+            abortCode = code;
+          },
+        },
+        [
+          {
+            name: 'Authorization',
+            value: 'Bearer private-header-value',
+            origin: 'https://staging.example.test',
+          },
+        ],
+      ),
+    ).rejects.toBe(networkError);
+    expect(abortCode).toBe('failed');
   });
 
   test('redacts runtime secrets and common bearer credentials from logs', () => {

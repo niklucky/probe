@@ -228,6 +228,8 @@ const reservedEnvironmentHeaderNames = new Set([
   'proxy-authorization',
   'proxy-connection',
   'referer',
+  'set-cookie',
+  'set-cookie2',
   'te',
   'trailer',
   'transfer-encoding',
@@ -265,7 +267,10 @@ export const environmentHeaderValueTemplateSchema = z
   .string()
   .min(1)
   .max(16_384)
-  .refine((value) => !/[\r\n]/.test(value), 'Header value must be one line')
+  .refine(
+    (value) => !/[\x00-\x08\x0A-\x1F\x7F]/.test(value),
+    'Header value contains a disallowed control character',
+  )
   .refine(
     (value) => extractEnvironmentVariableReferences(value).length > 0,
     'Header value must reference at least one environment variable',

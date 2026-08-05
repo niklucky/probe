@@ -71,6 +71,19 @@ function fixture(
       return headers.find((header) => header.id === id);
     },
     async createHeader(values: Record<string, any>) {
+      if (options.uniqueViolationOn === 'create') {
+        throw { code: '23505' };
+      }
+      if (
+        headers.some(
+          (header) =>
+            header.environmentId === values.environmentId &&
+            header.origin === values.origin &&
+            header.name.toLowerCase() === values.name.toLowerCase(),
+        )
+      ) {
+        throw { code: '23505' };
+      }
       const now = new Date();
       const header = {
         id: nextId++,
@@ -82,8 +95,24 @@ function fixture(
       return header;
     },
     async updateHeader(id: number, values: Record<string, any>) {
+      if (options.uniqueViolationOn === 'update') {
+        throw { cause: { code: '23505' } };
+      }
       const header = headers.find((candidate) => candidate.id === id);
       if (!header) return undefined;
+      const name = values.name ?? header.name;
+      const origin = values.origin ?? header.origin;
+      if (
+        headers.some(
+          (candidate) =>
+            candidate.id !== id &&
+            candidate.environmentId === header.environmentId &&
+            candidate.origin === origin &&
+            candidate.name.toLowerCase() === name.toLowerCase(),
+        )
+      ) {
+        throw { code: '23505' };
+      }
       Object.assign(header, values, { updatedAt: new Date() });
       return header;
     },
@@ -456,5 +485,74 @@ describe('environment header service', () => {
       success: true,
     });
     await expect(service.listHeaders(7, 3)).resolves.toEqual([]);
+  });
+
+  test('rejects unauthorized access without leaking header existence', async () => {
+    const { service } = fixture({ denyAuthorization: true });
+    await expect(service.listHeaders(7, 3)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    await expect(
+      service.createHeader(
+        {
+          environmentId: 7,
+          name: 'Authorization',
+          valueTemplate: 'Bearer {{access_token}}',
+          enabled: true,
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  test('maps case-insensitive duplicate names and constraint races to conflict', async () => {
+    const { service } = fixture();
+    await service.createHeader(
+      {
+        environmentId: 7,
+        name: 'Authorization',
+        valueTemplate: 'Bearer {{access_token}}',
+        enabled: true,
+      },
+      3,
+    );
+    await expect(
+      service.createHeader(
+        {
+          environmentId: 7,
+          name: 'authorization',
+          valueTemplate: 'Bearer {{other_token}}',
+          enabled: true,
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    const createRace = fixture({ uniqueViolationOn: 'create' });
+    await expect(
+      createRace.service.createHeader(
+        {
+          environmentId: 7,
+          name: 'X-Test-Tenant',
+          valueTemplate: '{{tenant_id}}',
+          enabled: true,
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    const updateRace = fixture({ uniqueViolationOn: 'update' });
+    const created = await updateRace.service.createHeader(
+      {
+        environmentId: 7,
+        name: 'X-Test-Tenant',
+        valueTemplate: '{{tenant_id}}',
+        enabled: true,
+      },
+      3,
+    );
+    await expect(
+      updateRace.service.updateHeader({ id: created!.id, enabled: false }, 3),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 });

@@ -72,6 +72,8 @@ describe('environment header definitions', () => {
       'Forwarded',
       'X-Forwarded-For',
       'Sec-Fetch-Site',
+      'Set-Cookie',
+      'Set-Cookie2',
       'X-Probe-Internal',
     ]) {
       expect(
@@ -83,6 +85,27 @@ describe('environment header definitions', () => {
       createEnvironmentHeaderInputSchema.safeParse({
         ...base,
         name: 'X-Test-Tenant',
+      }).success,
+    ).toBe(true);
+  });
+
+  test('rejects disallowed value controls while preserving legal tabs', () => {
+    for (const valueTemplate of [
+      'Bearer {{access_token}}\0',
+      'Bearer {{access_token}}\nnext',
+      'Bearer {{access_token}}\x7F',
+    ]) {
+      expect(
+        createEnvironmentHeaderInputSchema.safeParse({
+          ...base,
+          valueTemplate,
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      createEnvironmentHeaderInputSchema.safeParse({
+        ...base,
+        valueTemplate: 'Bearer\t{{access_token}}',
       }).success,
     ).toBe(true);
   });

@@ -282,12 +282,42 @@ export function EnvironmentsPage() {
   const submitHeader = (event: React.FormEvent) => {
     event.preventDefault();
     if (!headersEnvironment) return;
+    let canonicalOrigin: string;
+    try {
+      const origin = new URL(headerForm.origin);
+      if (
+        !['http:', 'https:'].includes(origin.protocol) ||
+        origin.username ||
+        origin.password
+      ) {
+        throw new Error('invalid origin');
+      }
+      canonicalOrigin = origin.origin;
+    } catch {
+      setHeaderError('Header origin must be a valid HTTP(S) origin');
+      return;
+    }
+    if (headerForm.origin.trim() !== canonicalOrigin) {
+      setHeaderError(
+        `Header origin must be canonical and contain no path, query, or fragment. Use ${canonicalOrigin}`,
+      );
+      return;
+    }
     if (editingHeaderId) {
-      updateHeader.mutate({ id: editingHeaderId, ...headerForm });
+      updateHeader.mutate({
+        id: editingHeaderId,
+        name: headerForm.name,
+        origin: canonicalOrigin,
+        enabled: headerForm.enabled,
+        ...(headerForm.valueTemplate
+          ? { valueTemplate: headerForm.valueTemplate }
+          : {}),
+      });
     } else {
       createHeader.mutate({
         environmentId: headersEnvironment.id,
         ...headerForm,
+        origin: canonicalOrigin,
       });
     }
   };
@@ -995,8 +1025,12 @@ export function EnvironmentsPage() {
                       valueTemplate: event.target.value,
                     })
                   }
-                  placeholder="Bearer {{access_token}}"
-                  required
+                  placeholder={
+                    editingHeaderId
+                      ? 'Leave blank to keep the existing template'
+                      : 'Bearer {{access_token}}'
+                  }
+                  required={!editingHeaderId}
                 />
               </div>
             </div>
@@ -1082,7 +1116,7 @@ export function EnvironmentsPage() {
                       setEditingHeaderId(header.id);
                       setHeaderForm({
                         name: header.name,
-                        valueTemplate: header.valueTemplate,
+                        valueTemplate: '',
                         origin: header.origin,
                         enabled: header.enabled,
                       });

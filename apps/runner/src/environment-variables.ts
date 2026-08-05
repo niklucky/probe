@@ -62,14 +62,6 @@ export interface RuntimeHeader {
   origin: string;
 }
 
-export function headersForRequestOrigin(
-  headers: RuntimeHeader[],
-  requestUrl: string,
-) {
-  const origin = new URL(requestUrl).origin;
-  return headers.filter((header) => header.origin === origin);
-}
-
 export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {
   return [
     ...new Set(
@@ -112,8 +104,10 @@ export function resolveRuntimeHeaders(
         throw new Error(`Header "${name}" has a non-canonical origin`);
       }
       const value = resolveEnvironmentTemplate(header.valueTemplate, values);
-      if (/[\r\n]/.test(value)) {
-        throw new Error(`Header "${name}" contains a line break`);
+      if (/[\x00-\x08\x0A-\x1F\x7F]/.test(value)) {
+        throw new Error(
+          `Header "${name}" contains a disallowed control character`,
+        );
       }
       if (Buffer.byteLength(value, 'utf8') > 16_384) {
         throw new Error(`Header "${name}" exceeds the 16384-byte limit`);
