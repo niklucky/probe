@@ -1,14 +1,17 @@
 import ts from 'typescript';
 
-const CREDENTIAL_TEXT =
-  /(?:password|passwd|secret|token|api[-_ ]?key|authorization|cookie|session|credential)/i;
+const CREDENTIAL_ASSIGNMENT =
+  /\b(?:password|passwd|secret|token|api[-_ ]?key|authorization|cookie|credential)\b\s*[:=]\s*\S+/gi;
+const BEARER_VALUE = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 
 export function sanitizeObservedText(value: unknown, maxLength = 500) {
   if (typeof value !== 'string') return null;
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) return null;
-  if (CREDENTIAL_TEXT.test(normalized)) return '[REDACTED]';
-  return normalized.slice(0, maxLength);
+  return normalized
+    .replace(CREDENTIAL_ASSIGNMENT, '[REDACTED]')
+    .replace(BEARER_VALUE, '[REDACTED]')
+    .slice(0, maxLength);
 }
 
 export interface LocatorPolicyResult {
@@ -16,6 +19,7 @@ export interface LocatorPolicyResult {
   usedTestIds: string[];
   warnings: string[];
   inventedTestIds: string[];
+  hasDynamicTestId: boolean;
 }
 
 export function inspectAutomationLocatorPolicy(
@@ -32,6 +36,7 @@ export function inspectAutomationLocatorPolicy(
   );
   const used = new Set<string>();
   const warnings = new Set<string>();
+  let hasDynamicTestId = false;
 
   const literalArgument = (call: ts.CallExpression, index = 0) => {
     const argument = call.arguments[index];
@@ -47,10 +52,16 @@ export function inspectAutomationLocatorPolicy(
         if (method === 'getByTestId') {
           const value = literalArgument(node);
           if (value) used.add(value);
+          else {
+            hasDynamicTestId = true;
+            warnings.add('Dynamic test-ID locator used');
+          }
         }
         if (method === 'locator') {
           const value = literalArgument(node);
-          if (value?.startsWith('//') || value?.startsWith('xpath=')) {
+          if (!value) {
+            warnings.add('Dynamic raw locator used');
+          } else if (value.startsWith('//') || value.startsWith('xpath=')) {
             warnings.add('Raw XPath locator used');
           } else {
             warnings.add('Raw CSS locator used');
@@ -70,5 +81,6 @@ export function inspectAutomationLocatorPolicy(
     usedTestIds: [...used].sort(),
     warnings: [...warnings],
     inventedTestIds: [...used].filter((value) => !observed.has(value)).sort(),
+    hasDynamicTestId,
   };
 }

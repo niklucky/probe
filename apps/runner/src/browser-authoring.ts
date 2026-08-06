@@ -229,6 +229,9 @@ async function validateAndFormatSource(
       `Automation invented unobserved test IDs: ${locatorPolicy.inventedTestIds.join(', ')}`,
     );
   }
+  if (locatorPolicy.hasDynamicTestId) {
+    throw new Error('Automation uses a dynamic, unverified test ID');
+  }
   return {
     source: await format(cleaned, {
       parser: 'typescript',
@@ -274,6 +277,25 @@ export async function runBrowserAuthoringSession(
   }
   const started = Date.now();
   let browser: Awaited<ReturnType<typeof startAuthoringBrowser>> | undefined;
+  let heartbeatPhase:
+    'inspecting_page' | 'exploring_manual_steps' | 'generating_automation' =
+    'inspecting_page';
+  const controller = new AbortController();
+  let cancellationDetected = false;
+  const heartbeatTimer = setInterval(
+    async () => {
+      const heartbeat = await repository
+        .heartbeatBrowserAuthoring(
+          sessionId,
+          runnerConfig.RUNNER_ID,
+          heartbeatPhase,
+        )
+        .catch(() => undefined);
+      if (heartbeat?.cancellationRequestedAt) cancellationDetected = true;
+      if (!heartbeat || heartbeat.cancellationRequestedAt) controller.abort();
+    },
+    Math.max(1_000, runnerConfig.RUNNER_STALE_SECONDS * 250),
+  );
   try {
     const specification = payload.specification;
     const requiredVariables =
@@ -345,6 +367,7 @@ export async function runBrowserAuthoringSession(
       },
       runtimeEnvironment,
     );
+    heartbeatPhase = 'inspecting_page';
     await repository.heartbeatBrowserAuthoring(
       sessionId,
       runnerConfig.RUNNER_ID,
@@ -369,6 +392,7 @@ export async function runBrowserAuthoringSession(
       observedIds([initial]),
     );
     const adapter = await resolveAdapter(repository, payload.connectionRef);
+    heartbeatPhase = 'exploring_manual_steps';
     await repository.heartbeatBrowserAuthoring(
       sessionId,
       runnerConfig.RUNNER_ID,
@@ -392,6 +416,7 @@ export async function runBrowserAuthoringSession(
       maxToolCalls: payload.maxToolCalls,
       maxDurationMs: payload.timeoutSeconds * 1000,
       maxTotalTokens: 64_000,
+      signal: controller.signal,
       parseCall(value) {
         return browserExplorationDecisionSchema.parse(value).call;
       },
@@ -429,6 +454,7 @@ export async function runBrowserAuthoringSession(
         return result;
       },
     });
+    heartbeatPhase = 'generating_automation';
     await repository.heartbeatBrowserAuthoring(
       sessionId,
       runnerConfig.RUNNER_ID,
@@ -452,6 +478,7 @@ export async function runBrowserAuthoringSession(
       schema: sourceSchema,
       schemaName: 'playwright_browser_observed_automation',
       maxOutputTokens: 8_000,
+      signal: controller.signal,
     });
     const validated = await validateAndFormatSource(
       generation.value.source,
@@ -513,7 +540,8 @@ export async function runBrowserAuthoringSession(
     }
   } catch (error) {
     const message = sanitizeProviderMessage(error);
-    const cancelled = message === 'BROWSER_AUTHORING_CANCELLED';
+    const cancelled =
+      cancellationDetected || message === 'BROWSER_AUTHORING_CANCELLED';
     const timedOut = Date.now() - started >= payload.timeoutSeconds * 1000;
     await fail(
       cancelled ? 'cancelled' : timedOut ? 'timed_out' : 'failed',
@@ -524,6 +552,7 @@ export async function runBrowserAuthoringSession(
           : message,
     );
   } finally {
+    clearInterval(heartbeatTimer);
     await browser?.close().catch(() => undefined);
   }
 }

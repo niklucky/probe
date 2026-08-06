@@ -63,7 +63,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
     config.apiKey || '',
     ...Object.values(config.headers || {}),
   ];
-  return {
+  const adapter: AiAdapter = {
     async generateStructured<T>(
       request: StructuredGenerationRequest,
     ): Promise<StructuredGenerationResult<T>> {
@@ -80,6 +80,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
         const response = await fetcher(joinUrl(endpoint, 'chat/completions'), {
           method: 'POST',
           redirect: 'error',
+          signal: request.signal,
           headers: { ...requestHeaders(config), ...auth },
           body: JSON.stringify({
             model: config.model,
@@ -138,7 +139,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
     },
     async runToolLoop(request) {
       return runBoundedToolLoop(
-        (generation) => this.generateStructured(generation),
+        (generation) => adapter.generateStructured(generation),
         request,
       );
     },
@@ -175,6 +176,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
       }
     },
   };
+  return adapter;
 }
 
 function anthropicAdapter(
@@ -191,7 +193,7 @@ function anthropicAdapter(
     config.apiKey || '',
     ...Object.values(config.headers || {}),
   ];
-  return {
+  const adapter: AiAdapter = {
     async generateStructured<T>(
       request: StructuredGenerationRequest,
     ): Promise<StructuredGenerationResult<T>> {
@@ -200,6 +202,7 @@ function anthropicAdapter(
         const response = await fetcher(joinUrl(endpoint, 'messages'), {
           method: 'POST',
           redirect: 'error',
+          signal: request.signal,
           headers,
           body: JSON.stringify({
             model: config.model,
@@ -258,7 +261,7 @@ function anthropicAdapter(
     },
     async runToolLoop(request) {
       return runBoundedToolLoop(
-        (generation) => this.generateStructured(generation),
+        (generation) => adapter.generateStructured(generation),
         request,
       );
     },
@@ -295,6 +298,7 @@ function anthropicAdapter(
       }
     },
   };
+  return adapter;
 }
 
 export function createAiAdapter(

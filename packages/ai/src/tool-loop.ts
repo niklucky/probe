@@ -17,8 +17,8 @@ export async function runBoundedToolLoop<TCall, TResult>(
   let inputTokens = 0;
   let outputTokens = 0;
   let totalTokens = 0;
-  let model = '';
-  let provider: BoundedToolLoopResult<TCall, TResult>['provider'] = 'openai';
+  let model: BoundedToolLoopResult<TCall, TResult>['model'] = null;
+  let provider: BoundedToolLoopResult<TCall, TResult>['provider'] = null;
 
   for (let index = 0; index < request.maxToolCalls; index += 1) {
     if (request.signal?.aborted) {
@@ -31,6 +31,11 @@ export async function runBoundedToolLoop<TCall, TResult>(
       call,
       result: request.serializeResult?.(result) ?? result,
     }));
+    const remainingMs = request.maxDurationMs - (Date.now() - started);
+    const deadline = new AbortController();
+    const abort = () => deadline.abort();
+    request.signal?.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(abort, remainingMs);
     const response = await generate<unknown>({
       system: request.system,
       prompt: [
@@ -42,18 +47,16 @@ export async function runBoundedToolLoop<TCall, TResult>(
       schema: request.decisionSchema,
       schemaName: request.decisionSchemaName || 'browser_tool_decision',
       maxOutputTokens: 1_000,
+      signal: deadline.signal,
+    }).finally(() => {
+      clearTimeout(timeout);
+      request.signal?.removeEventListener('abort', abort);
     });
     model = response.model;
     provider = response.provider;
     inputTokens += response.usage?.inputTokens ?? 0;
     outputTokens += response.usage?.outputTokens ?? 0;
     totalTokens += response.usage?.totalTokens ?? 0;
-    if (totalTokens > request.maxTotalTokens) {
-      throw new AiProviderError(
-        'PROVIDER_ERROR',
-        'Tool loop exceeded its AI token budget',
-      );
-    }
     const call = request.parseCall(response.value);
     if (request.isFinished(call)) {
       return {
@@ -65,7 +68,44 @@ export async function runBoundedToolLoop<TCall, TResult>(
         finished: true,
       };
     }
-    turns.push({ call, result: await request.execute(call) });
+    if (totalTokens > request.maxTotalTokens) break;
+    const executeRemainingMs = request.maxDurationMs - (Date.now() - started);
+    if (executeRemainingMs <= 0) {
+      throw new AiProviderError('PROVIDER_ERROR', 'Tool loop timed out');
+    }
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timedExecution = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () =>
+          reject(new AiProviderError('PROVIDER_ERROR', 'Tool loop timed out')),
+        executeRemainingMs,
+      );
+    });
+    let rejectCancellation: (() => void) | undefined;
+    const cancelledExecution = new Promise<never>((_, reject) => {
+      rejectCancellation = () =>
+        reject(
+          new AiProviderError('PROVIDER_ERROR', 'Tool loop was cancelled'),
+        );
+      if (request.signal?.aborted) {
+        rejectCancellation();
+        return;
+      }
+      request.signal?.addEventListener('abort', rejectCancellation, {
+        once: true,
+      });
+    });
+    const result = await Promise.race([
+      request.execute(call),
+      timedExecution,
+      cancelledExecution,
+    ]).finally(() => {
+      clearTimeout(timeoutId);
+      if (rejectCancellation) {
+        request.signal?.removeEventListener('abort', rejectCancellation);
+      }
+    });
+    turns.push({ call, result });
   }
 
   return {

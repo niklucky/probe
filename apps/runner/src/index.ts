@@ -24,6 +24,7 @@ import {
   isRunnableExecutionSnapshot,
 } from './repository';
 import { runBrowserAuthoringSession } from './browser-authoring';
+import { cleanupAbandonedBrowserAuthoring } from './browser-authoring-runtime';
 
 const repository = createRunnerRepository();
 const storage = new Client({
@@ -251,8 +252,10 @@ async function main() {
         cleanupAbandonedExecution,
       );
       if (recovered) console.log(`Recovered ${recovered} abandoned job(s)`);
-      const authoringRecovered =
-        await repository.recoverStaleBrowserAuthoring(before);
+      const authoringRecovered = await repository.recoverStaleBrowserAuthoring(
+        before,
+        cleanupAbandonedBrowserAuthoring,
+      );
       if (authoringRecovered) {
         console.log(
           `Recovered ${authoringRecovered} abandoned browser authoring session(s)`,

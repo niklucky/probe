@@ -1,4 +1,11 @@
-import { browserAuthoringSessions, db, desc, eq } from '@probe/db';
+import {
+  browserAuthoringSessions,
+  db,
+  desc,
+  eq,
+  and,
+  notInArray,
+} from '@probe/db';
 
 type Database = typeof db;
 
@@ -28,6 +35,19 @@ export function createBrowserAuthoringRepository(database: Database = db) {
         orderBy: desc(browserAuthoringSessions.createdAt),
       });
     },
+    findActive(testCaseId: number) {
+      return database.query.browserAuthoringSessions.findFirst({
+        where: and(
+          eq(browserAuthoringSessions.testCaseId, testCaseId),
+          notInArray(browserAuthoringSessions.status, [
+            'completed',
+            'failed',
+            'cancelled',
+            'timed_out',
+          ]),
+        ),
+      });
+    },
     async requestCancellation(id: number) {
       return database.transaction(async (transaction) => {
         const [session] = await transaction
@@ -51,7 +71,7 @@ export function createBrowserAuthoringRepository(database: Database = db) {
             session.status === 'queued'
               ? {
                   status: 'cancelled',
-                  phase: 'failed',
+                  phase: 'starting_browser',
                   cancellationRequestedAt: now,
                   completedAt: now,
                   updatedAt: now,

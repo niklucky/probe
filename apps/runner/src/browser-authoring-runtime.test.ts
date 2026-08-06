@@ -57,4 +57,35 @@ describe('isolated browser authoring runtime', () => {
       ),
     ).toThrow('dedicated egress-controlled');
   });
+
+  test('rejects non-HTTP and credential-bearing base URLs', () => {
+    const payload = {
+      id: 30,
+      baseUrl: 'file:///etc/passwd',
+      testIdAttribute: 'data-testid',
+      timeoutSeconds: 300,
+      settings: {
+        containerImage: 'runner:1',
+        cpuLimit: 1,
+        memoryMb: 512,
+        processLimit: 64,
+        networkPolicy: 'probe-runner-egress',
+      },
+    };
+    expect(() =>
+      buildAuthoringDockerArgs(payload, '/tmp/browser-authoring.mjs', {
+        values: {},
+        secretNames: [],
+        cookies: [],
+        headers: [],
+      }),
+    ).toThrow('approved HTTP URL');
+    expect(() =>
+      buildAuthoringDockerArgs(
+        { ...payload, baseUrl: 'https://user:pass@example.test' },
+        '/tmp/browser-authoring.mjs',
+        { values: {}, secretNames: [], cookies: [], headers: [] },
+      ),
+    ).toThrow('approved HTTP URL');
+  });
 });

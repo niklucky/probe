@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { BrowserToolCall, BrowserToolResult } from '@probe/shared';
-import type { RuntimeEnvironment } from './executor';
+import { approvedTarget, type RuntimeEnvironment } from './executor';
 
 export interface AuthoringRuntimePayload {
   id: number;
@@ -26,6 +26,7 @@ import readline from 'node:readline';
 const baseUrl = new URL(process.env.BASE_URL);
 const allowedOrigin = baseUrl.origin;
 const testIdAttribute = process.env.TEST_ID_ATTRIBUTE || 'data-testid';
+const toolTimeoutMs = Number(process.env.TOOL_TIMEOUT_MS || 30000);
 selectors.setTestIdAttribute(testIdAttribute);
 const cookies = JSON.parse(process.env.PROBE_ENVIRONMENT_COOKIES || '[]');
 const headers = JSON.parse(process.env.PROBE_ENVIRONMENT_HEADERS || '[]');
@@ -45,6 +46,9 @@ await context.route('**/*', async (route) => {
     await route.abort('blockedbyclient');
     return;
   }
+  // Top-level navigation stays on the approved origin. Subresources may use
+  // the runner's egress-controlled network, but credentials are scoped to the
+  // exact origin they were configured for.
   const matching = headers.filter((header) => header.origin === origin);
   if (!matching.length) return route.continue();
   const nextHeaders = { ...request.headers() };
@@ -53,6 +57,8 @@ await context.route('**/*', async (route) => {
   await route.fulfill({ response });
 });
 const page = await context.newPage();
+page.setDefaultTimeout(toolTimeoutMs);
+page.setDefaultNavigationTimeout(toolTimeoutMs);
 page.on('framenavigated', async (frame) => {
   if (frame !== page.mainFrame()) return;
   const url = frame.url();
@@ -66,7 +72,8 @@ function safeText(value, max = 500) {
   let normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) return null;
   for (const secret of secretValues) normalized = normalized.split(secret).join('[REDACTED]');
-  if (/(?:password|passwd|secret|token|api[-_ ]?key|authorization|cookie|session|credential)/i.test(normalized)) return '[REDACTED]';
+  normalized = normalized.replace(/\b(?:password|passwd|secret|token|api[-_ ]?key|authorization|cookie|credential)\b\s*[:=]\s*\S+/gi, '[REDACTED]');
+  normalized = normalized.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, '[REDACTED]');
   return normalized.slice(0, max);
 }
 
@@ -141,7 +148,7 @@ async function execute(call) {
   if (call.operation === 'openPage') {
     const target = new URL(call.path || '/', baseUrl);
     if (target.origin !== allowedOrigin) throw new Error('Navigation outside the approved environment origin was blocked');
-    await page.goto(target.href, { waitUntil: 'domcontentloaded' });
+    await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: toolTimeoutMs });
   } else if (call.operation === 'inspectPage') {
     // Snapshot below is the operation.
   } else if (call.operation === 'click') {
@@ -210,9 +217,11 @@ export function buildAuthoringDockerArgs(
     '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=256m',
     `--mount=type=bind,src=${resolve(runtimePath)},dst=/workspace/browser-authoring.mjs,readonly`,
     '--env',
-    `BASE_URL=${new URL(payload.baseUrl).href}`,
+    `BASE_URL=${approvedTarget(payload.baseUrl)}`,
     '--env',
     `TEST_ID_ATTRIBUTE=${payload.testIdAttribute}`,
+    '--env',
+    `TOOL_TIMEOUT_MS=${Math.min(payload.timeoutSeconds * 1000, 30_000)}`,
   ];
   if (runtimeEnvironment.cookies.length)
     args.push('--env', 'PROBE_ENVIRONMENT_COOKIES');
@@ -244,7 +253,9 @@ export async function startAuthoringBrowser(
   const workspace = await mkdtemp(join(tmpdir(), 'probe-browser-authoring-'));
   await mkdir(workspace, { recursive: true });
   const runtimePath = join(workspace, 'browser-authoring.mjs');
-  await writeFile(runtimePath, runtimeSource, { mode: 0o600 });
+  // The container runs as unprivileged pwuser and only needs to read this
+  // bind-mounted runtime. The temporary directory remains host-private.
+  await writeFile(runtimePath, runtimeSource, { mode: 0o444 });
   const { args, containerName } = buildAuthoringDockerArgs(
     payload,
     runtimePath,
@@ -283,6 +294,7 @@ export async function startAuthoringBrowser(
     resolve(value: RuntimeToolResult): void;
     reject(error: Error): void;
   }> = [];
+  let processError: Error | null = null;
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
     stdout += chunk;
@@ -304,6 +316,12 @@ export async function startAuthoringBrowser(
   child.stderr.on('data', (chunk: string) => {
     stderr = (stderr + chunk).slice(-2000);
   });
+  child.once('error', (error) => {
+    processError = error;
+    for (let next = pending.shift(); next; next = pending.shift()) {
+      next.reject(error);
+    }
+  });
   child.once('exit', (code) => {
     const error = new Error(`Browser container exited (${code}): ${stderr}`);
     for (let next = pending.shift(); next; next = pending.shift()) {
@@ -316,11 +334,22 @@ export async function startAuthoringBrowser(
         `Browser container is not running (exit ${child.exitCode}): ${stderr}`,
       );
     }
-    const response = new Promise<RuntimeToolResult>(
-      (resolveResponse, rejectResponse) =>
-        pending.push({ resolve: resolveResponse, reject: rejectResponse }),
-    );
-    child.stdin.write(`${JSON.stringify(call)}\n`);
+    if (processError) throw processError;
+    let rejectWrite!: (error: Error) => void;
+    let resolveWrite!: (value: RuntimeToolResult) => void;
+    const response = new Promise<RuntimeToolResult>((resolve, reject) => {
+      resolveWrite = resolve;
+      rejectWrite = reject;
+      pending.push({ resolve, reject });
+    });
+    child.stdin.write(`${JSON.stringify(call)}\n`, (error) => {
+      if (!error) return;
+      const index = pending.findIndex(
+        ({ resolve }) => resolve === resolveWrite,
+      );
+      if (index >= 0) pending.splice(index, 1);
+      rejectWrite(error);
+    });
     return response;
   };
   const close = async () => {
@@ -334,10 +363,23 @@ export async function startAuthoringBrowser(
     if (child.exitCode === null) {
       await new Promise<void>((resolveStop) => {
         const stop = spawn('docker', ['stop', '--time=2', containerName]);
+        stop.once('error', () => resolveStop());
         stop.once('exit', () => resolveStop());
       });
     }
     await rm(workspace, { recursive: true, force: true });
   };
   return { execute, close };
+}
+
+export async function cleanupAbandonedBrowserAuthoring(sessionId: number) {
+  await new Promise<void>((resolveCleanup) => {
+    const cleanup = spawn(
+      'docker',
+      ['rm', '--force', `probe-authoring-${sessionId}`],
+      { stdio: 'ignore' },
+    );
+    cleanup.once('error', () => resolveCleanup());
+    cleanup.once('exit', () => resolveCleanup());
+  });
 }

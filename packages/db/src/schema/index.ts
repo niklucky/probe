@@ -900,6 +900,11 @@ export const browserAuthoringSessions = pgTable(
       table.testCaseId,
       table.createdAt,
     ),
+    activeCaseIndex: uniqueIndex('browser_authoring_sessions_active_case_index')
+      .on(table.testCaseId)
+      .where(
+        sql`${table.status} not in ('completed', 'failed', 'cancelled', 'timed_out')`,
+      ),
     validationIndex: index('browser_authoring_sessions_validation_index').on(
       table.validationExecutionId,
     ),

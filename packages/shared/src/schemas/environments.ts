@@ -465,10 +465,10 @@ export function extractEnvironmentVariableReferencesFromValue(value: unknown) {
   return references;
 }
 
-export type CreateEnvironmentInput = z.input<
+export type CreateEnvironmentInput = z.infer<
   typeof createEnvironmentInputSchema
 >;
-export type UpdateEnvironmentInput = z.input<
+export type UpdateEnvironmentInput = z.infer<
   typeof updateEnvironmentInputSchema
 >;
 export type CreateEnvironmentVariableInput = z.infer<

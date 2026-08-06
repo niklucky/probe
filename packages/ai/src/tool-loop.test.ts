@@ -57,29 +57,51 @@ describe('bounded AI browser tool loop', () => {
 
   test('stops before browser work when the token budget is exceeded', async () => {
     let executed = false;
-    await expect(
-      runBoundedToolLoop(
-        async <T>() => ({
-          value: { operation: 'inspectPage' } as T,
-          model: 'test-model',
-          provider: 'openai' as const,
-          usage: { inputTokens: 9, outputTokens: 2, totalTokens: 11 },
-          latencyMs: 1,
-        }),
-        {
-          prompt: 'explore',
-          decisionSchema: {},
-          maxToolCalls: 2,
-          maxDurationMs: 10_000,
-          maxTotalTokens: 10,
-          parseCall: (value) => value,
-          isFinished: () => false,
-          async execute() {
-            executed = true;
-          },
+    const result = await runBoundedToolLoop(
+      async <T>() => ({
+        value: { operation: 'inspectPage' } as T,
+        model: 'test-model',
+        provider: 'openai' as const,
+        usage: { inputTokens: 9, outputTokens: 2, totalTokens: 11 },
+        latencyMs: 1,
+      }),
+      {
+        prompt: 'explore',
+        decisionSchema: {},
+        maxToolCalls: 2,
+        maxDurationMs: 10_000,
+        maxTotalTokens: 10,
+        parseCall: (value) => value,
+        isFinished: () => false,
+        async execute() {
+          executed = true;
         },
-      ),
-    ).rejects.toThrow('token budget');
+      },
+    );
+    expect(result.finished).toBe(false);
     expect(executed).toBe(false);
+  });
+
+  test('accepts a finish decision even when its usage crosses the budget', async () => {
+    const result = await runBoundedToolLoop(
+      async <T>() => ({
+        value: { operation: 'finishExploration' } as T,
+        model: 'test-model',
+        provider: 'openai' as const,
+        usage: { inputTokens: 9, outputTokens: 2, totalTokens: 11 },
+        latencyMs: 1,
+      }),
+      {
+        prompt: 'explore',
+        decisionSchema: {},
+        maxToolCalls: 2,
+        maxDurationMs: 10_000,
+        maxTotalTokens: 10,
+        parseCall: (value) => value as { operation: string },
+        isFinished: (call) => call.operation === 'finishExploration',
+        async execute() {},
+      },
+    );
+    expect(result.finished).toBe(true);
   });
 });

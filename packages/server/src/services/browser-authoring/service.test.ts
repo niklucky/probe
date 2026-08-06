@@ -5,6 +5,9 @@ describe('browser authoring service', () => {
   test('queues a durable sanitized session against immutable revisions', async () => {
     const writes: Array<Record<string, unknown>> = [];
     const repository = {
+      async findActive() {
+        return undefined;
+      },
       async create(values: Record<string, unknown>) {
         writes.push(values);
         return {
@@ -89,6 +92,53 @@ describe('browser authoring service', () => {
       sourceTestCaseVersionId: 12,
       connectionRef: '7',
     });
-    expect(JSON.stringify(writes[0])).not.toContain('private');
+    expect(writes[0]).not.toHaveProperty('environmentVariables');
+    expect(writes[0]).not.toHaveProperty('secrets');
+  });
+
+  test('gets, lists, and cancels sessions through authorization checks', async () => {
+    const authorizationCalls: string[] = [];
+    let cancelled = false;
+    const session = {
+      id: 1,
+      projectId: 4,
+      testCaseId: 5,
+      status: 'exploring',
+      environment: { name: 'Staging' },
+      sourceTestCaseVersion: { versionNumber: 3 },
+    };
+    const repository = {
+      async find() {
+        return { ...session, status: cancelled ? 'cancelled' : session.status };
+      },
+      async list() {
+        return [session];
+      },
+      async requestCancellation() {
+        cancelled = true;
+        return { ...session, cancellationRequestedAt: new Date() };
+      },
+    };
+    const service = createBrowserAuthoringService(
+      repository as never,
+      {} as never,
+      {
+        async require() {
+          authorizationCalls.push('case');
+        },
+        async requireProject() {
+          authorizationCalls.push('project');
+        },
+      } as never,
+      {} as never,
+      {} as never,
+    );
+
+    expect(await service.get(1, 2)).toMatchObject({
+      environmentName: 'Staging',
+    });
+    expect(await service.list(5, 2)).toHaveLength(1);
+    expect(await service.cancel(1, 2)).toMatchObject({ status: 'cancelled' });
+    expect(authorizationCalls).toEqual(['project', 'case', 'project']);
   });
 });

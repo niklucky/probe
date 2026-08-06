@@ -16,6 +16,7 @@ export interface StructuredGenerationRequest {
   schemaName?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface NormalizedUsage {
@@ -62,8 +63,8 @@ export interface BoundedToolLoopRequest<TCall, TResult> {
 
 export interface BoundedToolLoopResult<TCall, TResult> {
   turns: Array<ToolLoopTurn<TCall, TResult>>;
-  model: string;
-  provider: AiProvider;
+  model: string | null;
+  provider: AiProvider | null;
   usage: NormalizedUsage;
   latencyMs: number;
   finished: boolean;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BrowserAuthoringSession } from '@probe/shared';
 import { trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -59,6 +59,7 @@ export function TestAutomationDialog({
   const [authoringSessionId, setAuthoringSessionId] = useState<number | null>(
     null,
   );
+  const invalidatedAutomationId = useRef<number | null>(null);
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
@@ -115,6 +116,7 @@ export function TestAutomationDialog({
       setError('');
       setSelectedAutomationId(null);
       setAuthoringSessionId(null);
+      invalidatedAutomationId.current = null;
     }
   }, [open]);
 
@@ -136,10 +138,18 @@ export function TestAutomationDialog({
       ({ id }) => id === authoringSession.generatedAutomationId,
     );
     if (!automation) {
-      utils.testAutomations.list.invalidate({ testCaseId });
+      if (
+        invalidatedAutomationId.current !==
+        authoringSession.generatedAutomationId
+      ) {
+        invalidatedAutomationId.current =
+          authoringSession.generatedAutomationId;
+        utils.testAutomations.list.invalidate({ testCaseId });
+      }
       return;
     }
     if (automation) {
+      invalidatedAutomationId.current = null;
       setProposalId(automation.id);
       setSelectedAutomationId(automation.id);
       setSource(automation.source);

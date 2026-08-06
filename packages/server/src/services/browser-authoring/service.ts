@@ -55,6 +55,11 @@ export function createBrowserAuthoringService(
           'Only a ready test-case version can be automated',
         );
       }
+      if (await repository.findActive(testCase.id)) {
+        throw new ConflictError(
+          'A browser authoring session is already active for this test case',
+        );
+      }
       const environment = await environments.get(input.environmentId, userId);
       if (environment.productId !== testCase.suite.productId) {
         throw new NotFoundError('Environment not found');
@@ -68,27 +73,45 @@ export function createBrowserAuthoringService(
         'test-authoring',
         input.connectionId,
       );
-      const session = await repository.create({
-        projectId: testCase.suite.product.projectId,
-        testCaseId: testCase.id,
-        sourceTestCaseVersionId: version.id,
-        environmentId: environment.id,
-        environmentProfileId: profile.id,
-        environmentProfileName: profile.name,
-        environmentProfileRevision: profile.revision,
-        connectionRef,
-        promptVersion: BROWSER_AUTHORING_PROMPT_VERSION,
-        toolContractVersion: BROWSER_TOOL_CONTRACT_VERSION,
-        specification: {
-          title: version.title,
-          description: version.description,
-          prerequisites: version.prerequisites,
-          steps: version.steps,
-          expectedResult: version.expectedResult,
-          tags: version.tags,
-        },
-        requestedById: userId,
-      });
+      let session;
+      try {
+        session = await repository.create({
+          projectId: testCase.suite.product.projectId,
+          testCaseId: testCase.id,
+          sourceTestCaseVersionId: version.id,
+          environmentId: environment.id,
+          environmentProfileId: profile.id,
+          environmentProfileName: profile.name,
+          environmentProfileRevision: profile.revision,
+          connectionRef,
+          promptVersion: BROWSER_AUTHORING_PROMPT_VERSION,
+          toolContractVersion: BROWSER_TOOL_CONTRACT_VERSION,
+          specification: {
+            title: version.title,
+            description: version.description,
+            prerequisites: version.prerequisites,
+            steps: version.steps,
+            expectedResult: version.expectedResult,
+            tags: version.tags,
+          },
+          requestedById: userId,
+        });
+      } catch (error) {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          error.code === '23505' &&
+          'constraint_name' in error &&
+          error.constraint_name ===
+            'browser_authoring_sessions_active_case_index'
+        ) {
+          throw new ConflictError(
+            'A browser authoring session is already active for this test case',
+          );
+        }
+        throw error;
+      }
       return publicSession({
         ...session,
         environment,

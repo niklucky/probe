@@ -283,6 +283,11 @@ export function createRunnerRepository(database: Database = db) {
             ),
           });
         if (!session) return undefined;
+        // Serialize version allocation for this test case within PostgreSQL so
+        // independent runner processes cannot choose the same next version.
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(${session.testCaseId})`,
+        );
         const latest = await transaction.query.testAutomations.findFirst({
           where: and(
             eq(testAutomations.testCaseId, session.testCaseId),
@@ -368,7 +373,7 @@ export function createRunnerRepository(database: Database = db) {
         .update(browserAuthoringSessions)
         .set({
           status,
-          phase: 'failed',
+          ...(status === 'cancelled' ? {} : { phase: 'failed' as const }),
           failureReason: reason.slice(0, 1000),
           completedAt: now,
           heartbeatAt: now,
@@ -383,7 +388,10 @@ export function createRunnerRepository(database: Database = db) {
         .returning();
       return session;
     },
-    async recoverStaleBrowserAuthoring(before: Date) {
+    async recoverStaleBrowserAuthoring(
+      before: Date,
+      cleanup: (sessionId: number) => Promise<void>,
+    ) {
       const stale = await database
         .select()
         .from(browserAuthoringSessions)
@@ -396,15 +404,36 @@ export function createRunnerRepository(database: Database = db) {
             lt(browserAuthoringSessions.heartbeatAt, before),
           ),
         );
+      let recovered = 0;
       for (const session of stale) {
+        const recoveryAt = new Date();
+        const [claimed] = await database
+          .update(browserAuthoringSessions)
+          .set({
+            workerId: null,
+            heartbeatAt: recoveryAt,
+            updatedAt: recoveryAt,
+          })
+          .where(
+            and(
+              eq(browserAuthoringSessions.id, session.id),
+              eq(browserAuthoringSessions.heartbeatAt, session.heartbeatAt!),
+              inArray(browserAuthoringSessions.status, [
+                'exploring',
+                'generating',
+              ]),
+            ),
+          )
+          .returning({ id: browserAuthoringSessions.id });
+        if (!claimed) continue;
+        await cleanup(session.id);
         const now = new Date();
-        await database
+        const [updated] = await database
           .update(browserAuthoringSessions)
           .set(
             session.cancellationRequestedAt
               ? {
                   status: 'cancelled',
-                  phase: 'failed',
                   failureReason:
                     'Browser authoring runner stopped after cancellation was requested',
                   completedAt: now,
@@ -424,14 +453,17 @@ export function createRunnerRepository(database: Database = db) {
           .where(
             and(
               eq(browserAuthoringSessions.id, session.id),
+              eq(browserAuthoringSessions.heartbeatAt, recoveryAt),
               inArray(browserAuthoringSessions.status, [
                 'exploring',
                 'generating',
               ]),
             ),
-          );
+          )
+          .returning({ id: browserAuthoringSessions.id });
+        if (updated) recovered += 1;
       }
-      return stale.length;
+      return recovered;
     },
     async finalizeBrowserAuthoringValidations() {
       const sessions = await database.query.browserAuthoringSessions.findMany({
