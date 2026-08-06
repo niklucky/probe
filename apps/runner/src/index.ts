@@ -23,6 +23,7 @@ import {
   isCurrentEnvironmentProfileSnapshot,
   isRunnableExecutionSnapshot,
 } from './repository';
+import { runBrowserAuthoringSession } from './browser-authoring';
 
 const repository = createRunnerRepository();
 const storage = new Client({
@@ -250,11 +251,26 @@ async function main() {
         cleanupAbandonedExecution,
       );
       if (recovered) console.log(`Recovered ${recovered} abandoned job(s)`);
+      const authoringRecovered =
+        await repository.recoverStaleBrowserAuthoring(before);
+      if (authoringRecovered) {
+        console.log(
+          `Recovered ${authoringRecovered} abandoned browser authoring session(s)`,
+        );
+      }
       lastRecovery = Date.now();
     }
     if (Date.now() - lastCleanup > 60 * 60 * 1000) {
       await cleanExpiredArtifacts();
       lastCleanup = Date.now();
+    }
+    await repository.finalizeBrowserAuthoringValidations();
+    const authoringSession = await repository.claimBrowserAuthoring(
+      runnerConfig.RUNNER_ID,
+    );
+    if (authoringSession) {
+      await runBrowserAuthoringSession(repository, authoringSession.id);
+      continue;
     }
     const job = await repository.claim(runnerConfig.RUNNER_ID);
     if (job) {

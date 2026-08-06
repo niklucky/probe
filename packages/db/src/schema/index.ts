@@ -124,6 +124,25 @@ export const automationRepairAttemptStatusEnum = pgEnum(
   'automation_repair_attempt_status',
   ['generated', 'running', 'passed', 'failed', 'rejected'],
 );
+export const browserAuthoringStatusEnum = pgEnum('browser_authoring_status', [
+  'queued',
+  'exploring',
+  'generating',
+  'validating',
+  'completed',
+  'failed',
+  'cancelled',
+  'timed_out',
+]);
+export const browserAuthoringPhaseEnum = pgEnum('browser_authoring_phase', [
+  'starting_browser',
+  'inspecting_page',
+  'exploring_manual_steps',
+  'generating_automation',
+  'validating_automation',
+  'complete',
+  'failed',
+]);
 
 // Users table
 export const users = pgTable('users', {
@@ -180,6 +199,9 @@ export const environments = pgTable(
     name: varchar('name', { length: 255 }).notNull(),
     type: environmentTypeEnum('type').notNull(),
     baseUrl: varchar('base_url', { length: 2048 }).notNull(),
+    testIdAttribute: varchar('test_id_attribute', { length: 100 })
+      .notNull()
+      .default('data-testid'),
     isDefault: boolean('is_default').notNull().default(false),
     createdById: integer('created_by_id')
       .references(() => users.id)
@@ -788,6 +810,102 @@ export const automationExecutionArtifacts = pgTable(
   }),
 );
 
+// Browser authoring is queued separately from ordinary execution. The runner
+// receives profile secrets only in memory and persists sanitized observations.
+export const browserAuthoringSessions = pgTable(
+  'browser_authoring_sessions',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => projects.id, { onDelete: 'cascade' })
+      .notNull(),
+    testCaseId: integer('test_case_id')
+      .references(() => testCases.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceTestCaseVersionId: integer('source_test_case_version_id')
+      .references(() => testCaseVersions.id, { onDelete: 'restrict' })
+      .notNull(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'restrict' })
+      .notNull(),
+    environmentProfileId: integer('environment_profile_id')
+      .references(() => environmentProfiles.id, { onDelete: 'restrict' })
+      .notNull(),
+    environmentProfileName: varchar('environment_profile_name', {
+      length: 255,
+    }).notNull(),
+    environmentProfileRevision: integer(
+      'environment_profile_revision',
+    ).notNull(),
+    connectionRef: varchar('connection_ref', { length: 255 }),
+    status: browserAuthoringStatusEnum('status').notNull().default('queued'),
+    phase: browserAuthoringPhaseEnum('phase')
+      .notNull()
+      .default('starting_browser'),
+    promptVersion: varchar('prompt_version', { length: 100 }).notNull(),
+    toolContractVersion: varchar('tool_contract_version', {
+      length: 100,
+    }).notNull(),
+    specification: jsonb('specification')
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    observations: jsonb('observations')
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    transcript: jsonb('transcript')
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    observedTestIds: jsonb('observed_test_ids')
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    toolCallCount: integer('tool_call_count').notNull().default(0),
+    maxToolCalls: integer('max_tool_calls').notNull().default(16),
+    timeoutSeconds: integer('timeout_seconds').notNull().default(600),
+    provider: aiProviderEnum('provider'),
+    model: varchar('model', { length: 255 }),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    latencyMs: integer('latency_ms'),
+    generatedAutomationId: integer('generated_automation_id').references(
+      () => testAutomations.id,
+      { onDelete: 'set null' },
+    ),
+    validationExecutionId: integer('validation_execution_id').references(
+      () => automationExecutionJobs.id,
+      { onDelete: 'set null' },
+    ),
+    validationStatus: varchar('validation_status', { length: 50 }),
+    failureReason: varchar('failure_reason', { length: 1000 }),
+    requestedById: integer('requested_by_id')
+      .references(() => users.id)
+      .notNull(),
+    workerId: varchar('worker_id', { length: 255 }),
+    claimedAt: timestamp('claimed_at'),
+    heartbeatAt: timestamp('heartbeat_at'),
+    cancellationRequestedAt: timestamp('cancellation_requested_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    queueIndex: index('browser_authoring_sessions_queue_index').on(
+      table.status,
+      table.createdAt,
+    ),
+    caseIndex: index('browser_authoring_sessions_case_index').on(
+      table.testCaseId,
+      table.createdAt,
+    ),
+    validationIndex: index('browser_authoring_sessions_validation_index').on(
+      table.validationExecutionId,
+    ),
+  }),
+);
+
 // A repair session is an explicit, bounded request against one failed run.
 // Candidate source lives in a new test_automations row and is never copied
 // over the accepted automation. Evidence snapshots contain sanitized text and
@@ -1222,6 +1340,7 @@ export const testCasesRelations = relations(testCases, ({ one, many }) => ({
   versions: many(testCaseVersions),
   aiAuthoringJobs: many(aiAuthoringJobs),
   automations: many(testAutomations),
+  browserAuthoringSessions: many(browserAuthoringSessions),
 }));
 
 export const aiAuthoringJobsRelations = relations(
@@ -1302,6 +1421,7 @@ export const testAutomationsRelations = relations(
     executionJobs: many(automationExecutionJobs),
     repairSessions: many(automationRepairSessions),
     repairCandidates: many(automationRepairAttempts),
+    browserAuthoringSessions: many(browserAuthoringSessions),
   }),
 );
 
@@ -1331,6 +1451,45 @@ export const automationExecutionJobsRelations = relations(
     artifacts: many(automationExecutionArtifacts),
     repairSourceSessions: many(automationRepairSessions),
     repairAttempts: many(automationRepairAttempts),
+    browserAuthoringSessions: many(browserAuthoringSessions),
+  }),
+);
+
+export const browserAuthoringSessionsRelations = relations(
+  browserAuthoringSessions,
+  ({ one }) => ({
+    project: one(projects, {
+      fields: [browserAuthoringSessions.projectId],
+      references: [projects.id],
+    }),
+    testCase: one(testCases, {
+      fields: [browserAuthoringSessions.testCaseId],
+      references: [testCases.id],
+    }),
+    sourceTestCaseVersion: one(testCaseVersions, {
+      fields: [browserAuthoringSessions.sourceTestCaseVersionId],
+      references: [testCaseVersions.id],
+    }),
+    environment: one(environments, {
+      fields: [browserAuthoringSessions.environmentId],
+      references: [environments.id],
+    }),
+    environmentProfile: one(environmentProfiles, {
+      fields: [browserAuthoringSessions.environmentProfileId],
+      references: [environmentProfiles.id],
+    }),
+    requestedBy: one(users, {
+      fields: [browserAuthoringSessions.requestedById],
+      references: [users.id],
+    }),
+    generatedAutomation: one(testAutomations, {
+      fields: [browserAuthoringSessions.generatedAutomationId],
+      references: [testAutomations.id],
+    }),
+    validationExecution: one(automationExecutionJobs, {
+      fields: [browserAuthoringSessions.validationExecutionId],
+      references: [automationExecutionJobs.id],
+    }),
   }),
 );
 

@@ -11,6 +11,7 @@ import type {
   StructuredGenerationRequest,
   StructuredGenerationResult,
 } from './types';
+import { runBoundedToolLoop } from './tool-loop';
 
 type Fetch = (
   input: string | URL | Request,
@@ -92,6 +93,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
               },
             ],
             temperature: request.temperature,
+            max_tokens: request.maxOutputTokens,
             response_format: supportsNativeJsonSchema
               ? {
                   type: 'json_schema',
@@ -133,6 +135,12 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
       } catch (error) {
         throw normalizeProviderError(error, secretValues);
       }
+    },
+    async runToolLoop(request) {
+      return runBoundedToolLoop(
+        (generation) => this.generateStructured(generation),
+        request,
+      );
     },
     async testConnection(): Promise<ConnectionTestResult> {
       const started = Date.now();
@@ -195,7 +203,7 @@ function anthropicAdapter(
           headers,
           body: JSON.stringify({
             model: config.model,
-            max_tokens: 4096,
+            max_tokens: request.maxOutputTokens ?? 4096,
             system: request.system,
             messages: [{ role: 'user', content: request.prompt }],
             temperature: request.temperature,
@@ -247,6 +255,12 @@ function anthropicAdapter(
       } catch (error) {
         throw normalizeProviderError(error, secretValues);
       }
+    },
+    async runToolLoop(request) {
+      return runBoundedToolLoop(
+        (generation) => this.generateStructured(generation),
+        request,
+      );
     },
     async testConnection(): Promise<ConnectionTestResult> {
       const started = Date.now();

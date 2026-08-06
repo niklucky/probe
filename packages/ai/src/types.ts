@@ -15,6 +15,7 @@ export interface StructuredGenerationRequest {
   schema: Record<string, unknown>;
   schemaName?: string;
   temperature?: number;
+  maxOutputTokens?: number;
 }
 
 export interface NormalizedUsage {
@@ -39,9 +40,41 @@ export interface ConnectionTestResult {
   capabilities: string[];
 }
 
+export interface ToolLoopTurn<TCall, TResult> {
+  call: TCall;
+  result: TResult;
+}
+
+export interface BoundedToolLoopRequest<TCall, TResult> {
+  system?: string;
+  prompt: string;
+  decisionSchema: Record<string, unknown>;
+  decisionSchemaName?: string;
+  maxToolCalls: number;
+  maxDurationMs: number;
+  maxTotalTokens: number;
+  signal?: AbortSignal;
+  parseCall(value: unknown): TCall;
+  isFinished(call: TCall): boolean;
+  execute(call: TCall): Promise<TResult>;
+  serializeResult?(result: TResult): unknown;
+}
+
+export interface BoundedToolLoopResult<TCall, TResult> {
+  turns: Array<ToolLoopTurn<TCall, TResult>>;
+  model: string;
+  provider: AiProvider;
+  usage: NormalizedUsage;
+  latencyMs: number;
+  finished: boolean;
+}
+
 export interface AiAdapter {
   generateStructured<T>(
     request: StructuredGenerationRequest,
   ): Promise<StructuredGenerationResult<T>>;
+  runToolLoop<TCall, TResult>(
+    request: BoundedToolLoopRequest<TCall, TResult>,
+  ): Promise<BoundedToolLoopResult<TCall, TResult>>;
   testConnection(): Promise<ConnectionTestResult>;
 }

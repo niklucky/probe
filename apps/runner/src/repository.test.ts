@@ -49,6 +49,7 @@ describe('execution snapshot validation', () => {
   test('allows generated automation only when linked to its running repair attempt', () => {
     expect(
       isRunnableExecutionSnapshot({
+        id: 12,
         ...payload,
         repairAttempts: [{ candidateAutomationId: 7, status: 'running' }],
       }),
@@ -60,6 +61,29 @@ describe('execution snapshot validation', () => {
         repairAttempts: [{ candidateAutomationId: 8, status: 'running' }],
       }),
     ).toBe(false);
+  });
+
+  test('allows a generated browser-authored proposal only for its fresh validation job', () => {
+    expect(
+      isRunnableExecutionSnapshot({
+        environmentId: 3,
+        environmentProfileId: 4,
+        environmentProfileRevision: 2,
+        environmentProfile: {
+          environmentId: 3,
+          revision: 2,
+          enabled: true,
+        },
+        automation: { id: 8, environmentId: 3, status: 'generated' },
+        browserAuthoringSessions: [
+          {
+            generatedAutomationId: 8,
+            validationExecutionId: 12,
+            status: 'validating',
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
   test('continues to allow accepted automation with a matching environment', () => {

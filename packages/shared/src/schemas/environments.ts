@@ -30,6 +30,7 @@ export const environmentSchema = createSelectSchema(environments).pick({
   name: true,
   type: true,
   baseUrl: true,
+  testIdAttribute: true,
   isDefault: true,
   createdById: true,
   createdAt: true,
@@ -46,12 +47,20 @@ export const createEnvironmentInputSchema = environmentInsertSchema
     name: true,
     type: true,
     isDefault: true,
+    testIdAttribute: true,
   })
   .extend({
     name: z.string().trim().min(1).max(255),
     baseUrl: baseUrlSchema,
     productId: z.number().int().positive(),
     isDefault: z.boolean().default(false),
+    testIdAttribute: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .regex(/^[A-Za-z_:][A-Za-z0-9_.:-]*$/, 'Test-ID attribute is invalid')
+      .default('data-testid'),
   });
 
 export const updateEnvironmentInputSchema = createEnvironmentInputSchema
@@ -456,10 +465,10 @@ export function extractEnvironmentVariableReferencesFromValue(value: unknown) {
   return references;
 }
 
-export type CreateEnvironmentInput = z.infer<
+export type CreateEnvironmentInput = z.input<
   typeof createEnvironmentInputSchema
 >;
-export type UpdateEnvironmentInput = z.infer<
+export type UpdateEnvironmentInput = z.input<
   typeof updateEnvironmentInputSchema
 >;
 export type CreateEnvironmentVariableInput = z.infer<
