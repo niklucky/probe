@@ -239,7 +239,7 @@ __probeHeaderTest.beforeEach(async ({ context }) => {
 ${source}`;
 }
 
-function approvedTarget(value: string) {
+export function approvedTarget(value: string) {
   const target = new URL(value);
   if (
     !['http:', 'https:'].includes(target.protocol) ||

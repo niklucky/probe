@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "browser_authoring_sessions_active_case_index" ON "browser_authoring_sessions" USING btree ("test_case_id") WHERE "browser_authoring_sessions"."status" not in ('completed', 'failed', 'cancelled', 'timed_out');

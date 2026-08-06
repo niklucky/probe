@@ -88,6 +88,9 @@ function fixture() {
         async generateStructured() {
           throw new Error('not used');
         },
+        async runToolLoop() {
+          throw new Error('not used');
+        },
         async testConnection() {
           return {
             ok: true,

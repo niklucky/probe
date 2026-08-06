@@ -14,6 +14,7 @@ import { aiAuthoringRouter } from './routers/ai-authoring';
 import { testAutomationsRouter } from './routers/test-automations';
 import { automationExecutionsRouter } from './routers/automation-executions';
 import { automationRepairsRouter } from './routers/automation-repairs';
+import { browserAuthoringRouter } from './routers/browser-authoring';
 
 export const appRouter = router({
   auth: authRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   testAutomations: testAutomationsRouter,
   automationExecutions: automationExecutionsRouter,
   automationRepairs: automationRepairsRouter,
+  browserAuthoring: browserAuthoringRouter,
 });
 
 export type AppRouter = typeof appRouter;

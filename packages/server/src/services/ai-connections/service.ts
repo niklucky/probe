@@ -232,6 +232,10 @@ export function createAiConnectionService(
         await validateConfiguration(config);
         return adapter.generateStructured(request);
       },
+      async runToolLoop(request) {
+        await validateConfiguration(config);
+        return adapter.runToolLoop(request);
+      },
       async testConnection() {
         await validateConfiguration(config);
         return adapter.testConnection();

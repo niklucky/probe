@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { trpc } from '@/lib/trpc';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useEffect, useRef, useState } from "react";
+import type { BrowserAuthoringSession } from "@probe/shared";
+import { trpc } from "@/lib/trpc";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -10,10 +11,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertCircle,
   Check,
@@ -24,7 +26,7 @@ import {
   StopCircle,
   Trash2,
   Wrench,
-} from 'lucide-react';
+} from "lucide-react";
 
 interface TestAutomationDialogProps {
   open: boolean;
@@ -48,19 +50,23 @@ export function TestAutomationDialog({
   const [activeSourceVersionId, setActiveSourceVersionId] = useState(
     sourceTestCaseVersionId,
   );
-  const [activeSourceVersionNumber, setActiveSourceVersionNumber] = useState(
-    sourceVersionNumber,
-  );
+  const [activeSourceVersionNumber, setActiveSourceVersionNumber] =
+    useState(sourceVersionNumber);
   const [isSourceReady, setIsSourceReady] = useState(canGenerate);
-  const [environmentId, setEnvironmentId] = useState('');
-  const [environmentProfileId, setEnvironmentProfileId] = useState('');
-  const [connectionId, setConnectionId] = useState('');
+  const [environmentId, setEnvironmentId] = useState("");
+  const [environmentProfileId, setEnvironmentProfileId] = useState("");
+  const [connectionId, setConnectionId] = useState("");
   const [proposalId, setProposalId] = useState<number | null>(null);
-  const [source, setSource] = useState('');
-  const [error, setError] = useState('');
+  const [source, setSource] = useState("");
+  const [error, setError] = useState("");
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
   >(null);
+  const [browserAssisted, setBrowserAssisted] = useState(false);
+  const [authoringSessionId, setAuthoringSessionId] = useState<number | null>(
+    null,
+  );
+  const invalidatedAutomationId = useRef<number | null>(null);
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
@@ -68,7 +74,7 @@ export function TestAutomationDialog({
     { enabled: open },
   );
   const { data: connections = [] } = trpc.aiConnections.available.useQuery(
-    { scope: 'test-authoring' },
+    { scope: "test-authoring" },
     { enabled: open },
   );
   const { data: profiles = [] } = trpc.environments.listProfiles.useQuery(
@@ -79,18 +85,35 @@ export function TestAutomationDialog({
     { testCaseId },
     { enabled: open },
   );
+  const { data: authoringSessions = [] } = trpc.browserAuthoring.list.useQuery(
+    { testCaseId },
+    { enabled: open },
+  );
+  const { data: authoringSession } = trpc.browserAuthoring.get.useQuery(
+    { id: authoringSessionId || 0 },
+    {
+      enabled: open && Boolean(authoringSessionId),
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        return status &&
+          ["completed", "failed", "cancelled", "timed_out"].includes(status)
+          ? false
+          : 1500;
+      },
+    },
+  );
 
   useEffect(() => {
     if (!environmentId && environments.length) {
       const preferred =
         environments.find((environment) => environment.isDefault) ??
         environments[0];
-      setEnvironmentId(String(preferred?.id ?? ''));
+      setEnvironmentId(String(preferred?.id ?? ""));
     }
   }, [environmentId, environments]);
 
   useEffect(() => {
-    setEnvironmentProfileId('');
+    setEnvironmentProfileId("");
   }, [environmentId]);
 
   useEffect(() => {
@@ -102,18 +125,56 @@ export function TestAutomationDialog({
   useEffect(() => {
     if (!open) {
       setProposalId(null);
-      setSource('');
-      setError('');
+      setSource("");
+      setError("");
       setSelectedAutomationId(null);
+      setAuthoringSessionId(null);
+      invalidatedAutomationId.current = null;
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || authoringSessionId) return;
+    const active = authoringSessions.find(
+      ({ status }) =>
+        !["completed", "failed", "cancelled", "timed_out"].includes(status),
+    );
+    if (active) {
+      setBrowserAssisted(true);
+      setAuthoringSessionId(active.id);
+    }
+  }, [authoringSessionId, authoringSessions, open]);
+
+  useEffect(() => {
+    if (!authoringSession?.generatedAutomationId) return;
+    const automation = automations.find(
+      ({ id }) => id === authoringSession.generatedAutomationId,
+    );
+    if (!automation) {
+      if (
+        invalidatedAutomationId.current !==
+        authoringSession.generatedAutomationId
+      ) {
+        invalidatedAutomationId.current =
+          authoringSession.generatedAutomationId;
+        utils.testAutomations.list.invalidate({ testCaseId });
+      }
+      return;
+    }
+    if (automation) {
+      invalidatedAutomationId.current = null;
+      setProposalId(automation.id);
+      setSelectedAutomationId(automation.id);
+      setSource(automation.source);
+    }
+  }, [authoringSession, automations, testCaseId, utils.testAutomations.list]);
 
   const generate = trpc.testAutomations.generate.useMutation({
     onSuccess: (automation) => {
       setProposalId(automation.id);
       setSource(automation.source);
       setSelectedAutomationId(automation.id);
-      setError('');
+      setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
@@ -121,9 +182,9 @@ export function TestAutomationDialog({
   const accept = trpc.testAutomations.accept.useMutation({
     onSuccess: (automation) => {
       setProposalId(null);
-      setSource('');
+      setSource("");
       setSelectedAutomationId(automation.id);
-      setError('');
+      setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
@@ -131,8 +192,8 @@ export function TestAutomationDialog({
   const discard = trpc.testAutomations.discard.useMutation({
     onSuccess: () => {
       setProposalId(null);
-      setSource('');
-      setError('');
+      setSource("");
+      setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
@@ -142,28 +203,62 @@ export function TestAutomationDialog({
       setActiveSourceVersionId(newVersion.id);
       setActiveSourceVersionNumber(newVersion.versionNumber);
       setIsSourceReady(true);
-      setError('');
+      setError("");
       utils.testCases.list.invalidate();
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const startBrowserAuthoring = trpc.browserAuthoring.start.useMutation({
+    onSuccess: (session) => {
+      setAuthoringSessionId(session.id);
+      setError("");
+      utils.browserAuthoring.list.invalidate({ testCaseId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const cancelBrowserAuthoring = trpc.browserAuthoring.cancel.useMutation({
+    onSuccess: () => {
+      setError("");
+      utils.browserAuthoring.list.invalidate({ testCaseId });
     },
     onError: (requestError) => setError(requestError.message),
   });
 
   const selectedConnection = connectionId
-    ? connectionId.startsWith('env:')
+    ? connectionId.startsWith("env:")
       ? connectionId
       : Number(connectionId)
     : undefined;
+  const authoringActive = Boolean(
+    authoringSession &&
+    !["completed", "failed", "cancelled", "timed_out"].includes(
+      authoringSession.status,
+    ),
+  );
   const busy =
     generate.isPending ||
     accept.isPending ||
     discard.isPending ||
-    markSourceReady.isPending;
+    markSourceReady.isPending ||
+    startBrowserAuthoring.isPending ||
+    cancelBrowserAuthoring.isPending ||
+    authoringActive;
   const selectedAutomation = automations.find(
     (automation) => automation.id === selectedAutomationId,
   );
 
   const requestGeneration = () => {
-    setError('');
+    setError("");
+    if (browserAssisted) {
+      startBrowserAuthoring.mutate({
+        testCaseId,
+        sourceTestCaseVersionId: activeSourceVersionId,
+        environmentId: Number(environmentId),
+        environmentProfileId: Number(environmentProfileId),
+        connectionId: selectedConnection,
+      });
+      return;
+    }
     generate.mutate({
       testCaseId,
       sourceTestCaseVersionId: activeSourceVersionId,
@@ -179,9 +274,9 @@ export function TestAutomationDialog({
         <DialogHeader>
           <DialogTitle>Playwright TypeScript automation</DialogTitle>
           <DialogDescription>
-            Generate an editable proposal from accepted manual version{' '}
-            {activeSourceVersionNumber}. Every regeneration creates a
-            separate, auditable automation version.
+            Generate an editable proposal from accepted manual version{" "}
+            {activeSourceVersionNumber}. Every regeneration creates a separate,
+            auditable automation version.
           </DialogDescription>
         </DialogHeader>
 
@@ -203,12 +298,12 @@ export function TestAutomationDialog({
                   className="self-end sm:self-auto"
                   disabled={busy}
                   onClick={() => {
-                    setError('');
-                    markSourceReady.mutate({ id: testCaseId, status: 'ready' });
+                    setError("");
+                    markSourceReady.mutate({ id: testCaseId, status: "ready" });
                   }}
                 >
                   <Check className="h-4 w-4" />
-                  {markSourceReady.isPending ? 'Marking ready…' : 'Ready'}
+                  {markSourceReady.isPending ? "Marking ready…" : "Ready"}
                 </Button>
               </div>
             </Alert>
@@ -227,7 +322,7 @@ export function TestAutomationDialog({
                 {environments.map((environment) => (
                   <option key={environment.id} value={environment.id}>
                     {environment.name} — {environment.baseUrl}
-                    {environment.isDefault ? ' (default)' : ''}
+                    {environment.isDefault ? " (default)" : ""}
                   </option>
                 ))}
               </Select>
@@ -251,8 +346,8 @@ export function TestAutomationDialog({
                     disabled={!profile.enabled}
                   >
                     {profile.name}
-                    {profile.isAnonymous ? ' (no authentication)' : ''}
-                    {!profile.enabled ? ' (disabled)' : ''}
+                    {profile.isAnonymous ? " (no authentication)" : ""}
+                    {!profile.enabled ? " (disabled)" : ""}
                   </option>
                 ))}
               </Select>
@@ -274,6 +369,37 @@ export function TestAutomationDialog({
               </Select>
             </div>
           </div>
+
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <Checkbox
+              id="browser-assisted-generation"
+              checked={browserAssisted}
+              disabled={authoringActive}
+              onCheckedChange={(checked) =>
+                setBrowserAssisted(checked === true)
+              }
+            />
+            <div className="grid gap-1">
+              <Label htmlFor="browser-assisted-generation">
+                Browser-assisted generation
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Let the model inspect and interact with the selected environment
+                before writing and validating the test. This may take several
+                minutes and use additional AI tokens.
+              </p>
+            </div>
+          </div>
+
+          {authoringSession && (
+            <BrowserAuthoringProgress
+              session={authoringSession}
+              cancelling={cancelBrowserAuthoring.isPending}
+              onCancel={() =>
+                cancelBrowserAuthoring.mutate({ id: authoringSession.id })
+              }
+            />
+          )}
 
           {error && (
             <Alert variant="destructive">
@@ -342,7 +468,11 @@ export function TestAutomationDialog({
               onClick={requestGeneration}
             >
               <Code2 className="mr-2 h-4 w-4" />
-              {generate.isPending ? 'Generating…' : 'Generate automation'}
+              {startBrowserAuthoring.isPending
+                ? "Starting browser…"
+                : generate.isPending
+                  ? "Generating…"
+                  : "Generate automation"}
             </Button>
           )}
 
@@ -356,12 +486,12 @@ export function TestAutomationDialog({
                   aria-pressed={selectedAutomationId === automation.id}
                   className={`flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50 ${
                     selectedAutomationId === automation.id
-                      ? 'border-primary bg-muted/50'
-                      : ''
+                      ? "border-primary bg-muted/50"
+                      : ""
                   }`}
                   onClick={() => {
                     setSelectedAutomationId(automation.id);
-                    if (automation.status === 'generated') {
+                    if (automation.status === "generated") {
                       setProposalId(automation.id);
                       setSource(automation.source);
                     }
@@ -373,8 +503,8 @@ export function TestAutomationDialog({
                       {automation.sourceVersionNumber}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {automation.environmentName} ·{' '}
-                      {automation.environmentProfileName ?? 'Legacy profile'} ·{' '}
+                      {automation.environmentName} ·{" "}
+                      {automation.environmentProfileName ?? "Legacy profile"} ·{" "}
                       {automation.provider}/{automation.model}
                     </div>
                   </div>
@@ -384,7 +514,7 @@ export function TestAutomationDialog({
                     )}
                     <Badge
                       variant={
-                        automation.status === 'accepted' ? 'default' : 'outline'
+                        automation.status === "accepted" ? "default" : "outline"
                       }
                     >
                       {automation.status}
@@ -398,7 +528,7 @@ export function TestAutomationDialog({
               </p>
             )}
             {selectedAutomation &&
-              selectedAutomation.status !== 'generated' && (
+              selectedAutomation.status !== "generated" && (
                 <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <Label
@@ -417,7 +547,7 @@ export function TestAutomationDialog({
                   />
                 </div>
               )}
-            {selectedAutomation?.status === 'accepted' && (
+            {selectedAutomation?.status === "accepted" && (
               <AutomationExecutionHistory
                 automationId={selectedAutomation.id}
                 environmentId={selectedAutomation.environmentId}
@@ -439,12 +569,98 @@ export function TestAutomationDialog({
   );
 }
 
+const authoringPhases = [
+  ["starting_browser", "Starting browser"],
+  ["inspecting_page", "Inspecting page"],
+  ["exploring_manual_steps", "Exploring manual-test steps"],
+  ["generating_automation", "Generating automation"],
+  ["validating_automation", "Validating automation"],
+  ["complete", "Complete"],
+] as const;
+
+function BrowserAuthoringProgress({
+  session,
+  cancelling,
+  onCancel,
+}: {
+  session: BrowserAuthoringSession;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  const terminal = ["completed", "failed", "cancelled", "timed_out"].includes(
+    session.status,
+  );
+  const currentIndex = authoringPhases.findIndex(
+    ([phase]) => phase === session.phase,
+  );
+  return (
+    <div className="grid gap-3 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Browser-assisted progress</div>
+          <div className="text-xs text-muted-foreground">
+            {session.toolCallCount} of {session.maxToolCalls} browser actions ·{" "}
+            {session.totalTokens ?? 0} AI tokens
+          </div>
+        </div>
+        {!terminal && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={cancelling}
+            onClick={onCancel}
+          >
+            <StopCircle className="mr-2 h-4 w-4" />
+            {cancelling ? "Cancelling…" : "Cancel"}
+          </Button>
+        )}
+      </div>
+      <ol className="grid gap-1 text-sm sm:grid-cols-3">
+        {authoringPhases.map(([phase, label], index) => (
+          <li
+            key={phase}
+            className={
+              index <= currentIndex && session.phase !== "failed"
+                ? "text-foreground"
+                : "text-muted-foreground"
+            }
+          >
+            {index < currentIndex || session.status === "completed" ? "✓ " : ""}
+            {label}
+          </li>
+        ))}
+      </ol>
+      {session.status === "completed" &&
+        session.validationStatus !== "passed" && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Proposal generated; validation did not pass</AlertTitle>
+            <AlertDescription>
+              {session.failureReason ||
+                "Review and edit the proposal before accepting it."}
+            </AlertDescription>
+          </Alert>
+        )}
+      {["failed", "cancelled", "timed_out"].includes(session.status) && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Browser-assisted generation {session.status}</AlertTitle>
+          <AlertDescription>
+            {session.failureReason || "The session did not complete."}
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 const terminalStatuses = new Set([
-  'passed',
-  'failed',
-  'timed_out',
-  'cancelled',
-  'infrastructure_error',
+  "passed",
+  "failed",
+  "timed_out",
+  "cancelled",
+  "infrastructure_error",
 ]);
 
 function AutomationExecutionHistory({
@@ -458,12 +674,12 @@ function AutomationExecutionHistory({
   preferredProfileId: number | null;
   preferredProfileRevision: number | null;
 }) {
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [captureVideo, setCaptureVideo] = useState(false);
   const [applyEnvironmentCookies, setApplyEnvironmentCookies] = useState(true);
   const [applyEnvironmentHeaders, setApplyEnvironmentHeaders] = useState(true);
   const [profileId, setProfileId] = useState(
-    preferredProfileId ? String(preferredProfileId) : '',
+    preferredProfileId ? String(preferredProfileId) : "",
   );
   const utils = trpc.useContext();
   const { data: jobs = [] } = trpc.automationExecutions.list.useQuery(
@@ -473,11 +689,11 @@ function AutomationExecutionHistory({
   const { data: profiles = [], isLoading: profilesLoading } =
     trpc.environments.listProfiles.useQuery({ environmentId });
   useEffect(() => {
-    setProfileId(preferredProfileId ? String(preferredProfileId) : '');
+    setProfileId(preferredProfileId ? String(preferredProfileId) : "");
   }, [automationId, preferredProfileId]);
   const queue = trpc.automationExecutions.queue.useMutation({
     onSuccess: () => {
-      setError('');
+      setError("");
       utils.automationExecutions.list.invalidate({ automationId });
     },
     onError: (requestError) => setError(requestError.message),
@@ -488,7 +704,7 @@ function AutomationExecutionHistory({
     onError: (requestError) => setError(requestError.message),
   });
   const artifactUrl = trpc.automationExecutions.artifactUrl.useMutation({
-    onSuccess: ({ url }) => window.open(url, '_blank', 'noopener,noreferrer'),
+    onSuccess: ({ url }) => window.open(url, "_blank", "noopener,noreferrer"),
     onError: (requestError) => setError(requestError.message),
   });
   const selectedProfile = profiles.find(
@@ -528,11 +744,11 @@ function AutomationExecutionHistory({
                 }
               >
                 {profile.name}
-                {!profile.enabled ? ' (disabled)' : ''}
+                {!profile.enabled ? " (disabled)" : ""}
                 {profile.id === preferredProfileId &&
                 profile.revision !== preferredProfileRevision
-                  ? ' (changed)'
-                  : ''}
+                  ? " (changed)"
+                  : ""}
               </option>
             ))}
           </select>
@@ -579,7 +795,7 @@ function AutomationExecutionHistory({
             }
           >
             <Play className="mr-2 h-4 w-4" />
-            {queue.isPending ? 'Queuing…' : 'Run accepted version'}
+            {queue.isPending ? "Queuing…" : "Run accepted version"}
           </Button>
         </div>
       </div>
@@ -599,29 +815,29 @@ function AutomationExecutionHistory({
                   <span className="text-sm font-medium">Run #{job.id}</span>
                   <Badge
                     variant={
-                      job.status === 'passed'
-                        ? 'default'
+                      job.status === "passed"
+                        ? "default"
                         : [
-                              'failed',
-                              'timed_out',
-                              'infrastructure_error',
+                              "failed",
+                              "timed_out",
+                              "infrastructure_error",
                             ].includes(job.status)
-                          ? 'destructive'
-                          : 'outline'
+                          ? "destructive"
+                          : "outline"
                     }
                   >
-                    {job.status.replace(/_/g, ' ')}
+                    {job.status.replace(/_/g, " ")}
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Attempt {job.attempt}/{job.maxAttempts} · timeout{' '}
+                  Attempt {job.attempt}/{job.maxAttempts} · timeout{" "}
                   {job.timeoutSeconds}s
                   {job.environmentProfileName
                     ? ` · profile ${job.environmentProfileName}`
-                    : ''}
+                    : ""}
                   {job.resultSummary
                     ? ` · ${job.resultSummary.durationMs}ms`
-                    : ''}
+                    : ""}
                 </p>
               </div>
               {!terminalStatuses.has(job.status) && (
@@ -646,7 +862,7 @@ function AutomationExecutionHistory({
                 {job.structuredLogs
                   .slice(-20)
                   .map((entry) => entry.message)
-                  .join('\n')}
+                  .join("\n")}
               </pre>
             )}
             {job.artifacts && job.artifacts.length > 0 && (
@@ -670,7 +886,7 @@ function AutomationExecutionHistory({
                 ))}
               </div>
             )}
-            {['failed', 'timed_out'].includes(job.status) && (
+            {["failed", "timed_out"].includes(job.status) && (
               <AutomationRepairPanel executionId={job.id} />
             )}
           </div>
@@ -685,45 +901,45 @@ function AutomationExecutionHistory({
 }
 
 function AutomationRepairPanel({ executionId }: { executionId: number }) {
-  const [mode, setMode] = useState<'review' | 'automatic'>('review');
+  const [mode, setMode] = useState<"review" | "automatic">("review");
   const [maxAttempts, setMaxAttempts] = useState(2);
   const [maxTotalTokens, setMaxTotalTokens] = useState(20_000);
   const [maxDurationSeconds, setMaxDurationSeconds] = useState(600);
-  const [connectionId, setConnectionId] = useState('');
-  const [error, setError] = useState('');
+  const [connectionId, setConnectionId] = useState("");
+  const [error, setError] = useState("");
   const utils = trpc.useContext();
   const { data: sessions = [] } = trpc.automationRepairs.list.useQuery(
     { executionId },
     { refetchInterval: 2000 },
   );
   const { data: connections = [] } = trpc.aiConnections.available.useQuery({
-    scope: 'test-execution',
+    scope: "test-execution",
   });
   const session = sessions[0];
   const request = trpc.automationRepairs.request.useMutation({
     onSuccess: () => {
-      setError('');
+      setError("");
       utils.automationRepairs.list.invalidate({ executionId });
     },
     onError: (requestError) => setError(requestError.message),
   });
   const continueRepair = trpc.automationRepairs.continue.useMutation({
     onSuccess: () => {
-      setError('');
+      setError("");
       utils.automationRepairs.list.invalidate({ executionId });
     },
     onError: (requestError) => setError(requestError.message),
   });
   const execute = trpc.automationRepairs.execute.useMutation({
     onSuccess: () => {
-      setError('');
+      setError("");
       utils.automationRepairs.list.invalidate({ executionId });
     },
     onError: (requestError) => setError(requestError.message),
   });
   const promote = trpc.testAutomations.accept.useMutation({
     onSuccess: () => {
-      setError('');
+      setError("");
       utils.testAutomations.list.invalidate();
     },
     onError: (requestError) => setError(requestError.message),
@@ -748,7 +964,7 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
               className="h-8 rounded border bg-background px-2"
               value={mode}
               onChange={(event) =>
-                setMode(event.target.value as 'review' | 'automatic')
+                setMode(event.target.value as "review" | "automatic")
               }
             >
               <option value="review">Review before retry</option>
@@ -815,7 +1031,7 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
               executionId,
               mode,
               connectionId: connectionId
-                ? connectionId.startsWith('env:')
+                ? connectionId.startsWith("env:")
                   ? connectionId
                   : Number(connectionId)
                 : undefined,
@@ -824,7 +1040,7 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
           }
         >
           <Wrench className="mr-2 h-4 w-4" />
-          {request.isPending ? 'Diagnosing…' : 'Diagnose and propose repair'}
+          {request.isPending ? "Diagnosing…" : "Diagnose and propose repair"}
         </Button>
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
@@ -838,14 +1054,14 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
           <div className="flex items-center gap-2 text-sm font-medium">
             <Wrench className="h-4 w-4" /> Repair session #{session.id}
             <Badge variant="outline">{session.classification}</Badge>
-            <Badge variant="outline">{session.status.replace(/_/g, ' ')}</Badge>
+            <Badge variant="outline">{session.status.replace(/_/g, " ")}</Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             {session.diagnosis}
           </p>
         </div>
         <p className="text-xs text-muted-foreground">
-          {session.attempts.length}/{session.maxAttempts} attempts ·{' '}
+          {session.attempts.length}/{session.maxAttempts} attempts ·{" "}
           {session.usedTokens}/{session.maxTotalTokens} tokens
         </p>
       </div>
@@ -863,7 +1079,7 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
               {attempt.candidateAutomation.versionNumber}
             </span>
             <Badge
-              variant={attempt.status === 'passed' ? 'default' : 'outline'}
+              variant={attempt.status === "passed" ? "default" : "outline"}
             >
               {attempt.status}
             </Badge>
@@ -874,11 +1090,11 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
           </pre>
           <p className="text-[11px] text-muted-foreground">
             {attempt.provider}/{attempt.model} · prompt {attempt.promptVersion}
-            {attempt.totalTokens ? ` · ${attempt.totalTokens} tokens` : ''}
+            {attempt.totalTokens ? ` · ${attempt.totalTokens} tokens` : ""}
           </p>
           <div className="flex justify-end gap-2">
-            {session.status === 'awaiting_review' &&
-              attempt.status === 'generated' && (
+            {session.status === "awaiting_review" &&
+              attempt.status === "generated" && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -893,8 +1109,8 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
                   <Play className="mr-2 h-3 w-3" /> Run candidate
                 </Button>
               )}
-            {attempt.status === 'passed' &&
-              attempt.candidateAutomation.status === 'generated' && (
+            {attempt.status === "passed" &&
+              attempt.candidateAutomation.status === "generated" && (
                 <Button
                   size="sm"
                   disabled={promote.isPending}
@@ -911,9 +1127,9 @@ function AutomationRepairPanel({ executionId }: { executionId: number }) {
           </div>
         </div>
       ))}
-      {session.mode === 'review' &&
-        session.status === 'active' &&
-        latestAttempt?.status === 'failed' && (
+      {session.mode === "review" &&
+        session.status === "active" &&
+        latestAttempt?.status === "failed" && (
           <Button
             size="sm"
             variant="outline"
