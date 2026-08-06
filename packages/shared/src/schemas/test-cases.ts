@@ -35,6 +35,7 @@ export const testCaseSchema = createSelectSchema(testCases).pick({
   createdById: true,
   createdAt: true,
   updatedAt: true,
+  deletedAt: true,
 });
 
 export const testCaseVersionSchema = createSelectSchema(testCaseVersions)
@@ -87,6 +88,7 @@ export const productTestCasesSchema = z.object({
 export const listTestCasesInputSchema = z.object({
   suiteId: testCaseInsertSchema.shape.suiteId,
   versionId: testCaseVersionInsertSchema.shape.suiteVersionId.optional(),
+  deleted: z.boolean().optional().default(false),
 });
 
 export const listTestCasesByProductInputSchema = z.object({
@@ -117,6 +119,9 @@ export const getTestCaseVersionsInputSchema = z.object({
 export const deleteTestCaseInputSchema = z.object({
   id: z.number().int().positive(),
 });
+
+export const restoreTestCaseInputSchema = deleteTestCaseInputSchema;
+export const permanentlyDeleteTestCaseInputSchema = deleteTestCaseInputSchema;
 
 export type TestStep = z.infer<typeof testStepSchema>;
 export type TestSpec = z.infer<typeof testSpecSchema>;

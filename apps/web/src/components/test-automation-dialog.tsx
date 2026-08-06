@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AlertCircle,
@@ -44,6 +45,13 @@ export function TestAutomationDialog({
   sourceVersionNumber,
   canGenerate,
 }: TestAutomationDialogProps) {
+  const [activeSourceVersionId, setActiveSourceVersionId] = useState(
+    sourceTestCaseVersionId,
+  );
+  const [activeSourceVersionNumber, setActiveSourceVersionNumber] = useState(
+    sourceVersionNumber,
+  );
+  const [isSourceReady, setIsSourceReady] = useState(canGenerate);
   const [environmentId, setEnvironmentId] = useState('');
   const [environmentProfileId, setEnvironmentProfileId] = useState('');
   const [connectionId, setConnectionId] = useState('');
@@ -86,6 +94,12 @@ export function TestAutomationDialog({
   }, [environmentId]);
 
   useEffect(() => {
+    setActiveSourceVersionId(sourceTestCaseVersionId);
+    setActiveSourceVersionNumber(sourceVersionNumber);
+    setIsSourceReady(canGenerate);
+  }, [canGenerate, sourceTestCaseVersionId, sourceVersionNumber]);
+
+  useEffect(() => {
     if (!open) {
       setProposalId(null);
       setSource('');
@@ -123,13 +137,27 @@ export function TestAutomationDialog({
     },
     onError: (requestError) => setError(requestError.message),
   });
+  const markSourceReady = trpc.testCases.update.useMutation({
+    onSuccess: ({ newVersion }) => {
+      setActiveSourceVersionId(newVersion.id);
+      setActiveSourceVersionNumber(newVersion.versionNumber);
+      setIsSourceReady(true);
+      setError('');
+      utils.testCases.list.invalidate();
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
 
   const selectedConnection = connectionId
     ? connectionId.startsWith('env:')
       ? connectionId
       : Number(connectionId)
     : undefined;
-  const busy = generate.isPending || accept.isPending || discard.isPending;
+  const busy =
+    generate.isPending ||
+    accept.isPending ||
+    discard.isPending ||
+    markSourceReady.isPending;
   const selectedAutomation = automations.find(
     (automation) => automation.id === selectedAutomationId,
   );
@@ -138,7 +166,7 @@ export function TestAutomationDialog({
     setError('');
     generate.mutate({
       testCaseId,
-      sourceTestCaseVersionId,
+      sourceTestCaseVersionId: activeSourceVersionId,
       environmentId: Number(environmentId),
       environmentProfileId: Number(environmentProfileId),
       connectionId: selectedConnection,
@@ -152,28 +180,46 @@ export function TestAutomationDialog({
           <DialogTitle>Playwright TypeScript automation</DialogTitle>
           <DialogDescription>
             Generate an editable proposal from accepted manual version{' '}
-            {sourceVersionNumber}. Every regeneration creates a separate,
-            auditable automation version.
+            {activeSourceVersionNumber}. Every regeneration creates a
+            separate, auditable automation version.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
-          {!canGenerate && (
+          {!isSourceReady && (
             <Alert>
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Manual version is not ready</AlertTitle>
-              <AlertDescription>
-                Mark the test case Ready before requesting automation.
-              </AlertDescription>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <AlertTitle>Manual version is not ready</AlertTitle>
+                  <AlertDescription>
+                    Mark the test case Ready before requesting automation.
+                  </AlertDescription>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-end sm:self-auto"
+                  disabled={busy}
+                  onClick={() => {
+                    setError('');
+                    markSourceReady.mutate({ id: testCaseId, status: 'ready' });
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                  {markSourceReady.isPending ? 'Marking ready…' : 'Ready'}
+                </Button>
+              </div>
             </Alert>
           )}
 
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               <Label htmlFor="automation-environment">Environment</Label>
-              <select
+              <Select
                 id="automation-environment"
-                className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                className="min-w-0"
                 value={environmentId}
                 onChange={(event) => setEnvironmentId(event.target.value)}
               >
@@ -184,13 +230,13 @@ export function TestAutomationDialog({
                     {environment.isDefault ? ' (default)' : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               <Label htmlFor="automation-profile">Browser profile</Label>
-              <select
+              <Select
                 id="automation-profile"
-                className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                className="min-w-0"
                 value={environmentProfileId}
                 onChange={(event) =>
                   setEnvironmentProfileId(event.target.value)
@@ -209,13 +255,13 @@ export function TestAutomationDialog({
                     {!profile.enabled ? ' (disabled)' : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               <Label htmlFor="automation-connection">AI connection</Label>
-              <select
+              <Select
                 id="automation-connection"
-                className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                className="min-w-0"
                 value={connectionId}
                 onChange={(event) => setConnectionId(event.target.value)}
               >
@@ -225,7 +271,7 @@ export function TestAutomationDialog({
                     {connection.name} — {connection.model}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
 
@@ -267,7 +313,7 @@ export function TestAutomationDialog({
                     busy ||
                     !environmentId ||
                     !environmentProfileId ||
-                    !canGenerate
+                    !isSourceReady
                   }
                   onClick={requestGeneration}
                 >
@@ -288,7 +334,10 @@ export function TestAutomationDialog({
             <Button
               type="button"
               disabled={
-                busy || !environmentId || !environmentProfileId || !canGenerate
+                busy ||
+                !environmentId ||
+                !environmentProfileId ||
+                !isSourceReady
               }
               onClick={requestGeneration}
             >

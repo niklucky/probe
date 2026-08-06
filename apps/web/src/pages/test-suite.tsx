@@ -42,6 +42,7 @@ import {
   Clock,
   MoreVertical,
   Trash2,
+  RotateCcw,
   Edit,
   Sparkles,
   Code2,
@@ -92,6 +93,10 @@ export function TestSuitePage() {
     sourceVersionNumber: number;
     canGenerate: boolean;
   } | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{
+    id: number;
+    title: string;
+  } | null>(null);
 
   const { data: suite, isLoading: isLoadingSuite } =
     trpc.testSuites.get.useQuery(
@@ -113,6 +118,12 @@ export function TestSuitePage() {
   const { data: testCases, isLoading: isLoadingCases } =
     trpc.testCases.list.useQuery(
       { suiteId: Number(suiteId) },
+      { enabled: !!suiteId },
+    );
+
+  const { data: deletedTestCases, isLoading: isLoadingDeletedCases } =
+    trpc.testCases.list.useQuery(
+      { suiteId: Number(suiteId), deleted: true },
       { enabled: !!suiteId },
     );
 
@@ -145,9 +156,23 @@ export function TestSuitePage() {
 
   const deleteTestCase = trpc.testCases.delete.useMutation({
     onSuccess: () => {
-      utils.testCases.list.invalidate({ suiteId: Number(suiteId) });
+      utils.testCases.list.invalidate();
     },
   });
+
+  const restoreTestCase = trpc.testCases.restore.useMutation({
+    onSuccess: () => {
+      utils.testCases.list.invalidate();
+    },
+  });
+
+  const permanentlyDeleteTestCase =
+    trpc.testCases.permanentlyDelete.useMutation({
+      onSuccess: () => {
+        utils.testCases.list.invalidate();
+        setPermanentDeleteTarget(null);
+      },
+    });
 
   // Create form handlers
   const handleAddStep = () => {
@@ -366,6 +391,210 @@ export function TestSuitePage() {
       default:
         return null;
     }
+  };
+
+  const renderTestCaseList = (
+    cases: NonNullable<typeof testCases> | undefined,
+    options: { deleted?: boolean; loading?: boolean } = {},
+  ) => {
+    if (options.loading) {
+      return (
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+      );
+    }
+
+    if (!cases?.length) {
+      return (
+        <Card className="p-8">
+          <div className="text-center space-y-3">
+            <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
+            <h3 className="text-lg font-medium">
+              {options.deleted ? 'No deleted test cases' : 'No test cases yet'}
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              {options.deleted
+                ? 'Deleted test cases will appear here until they are restored or permanently deleted.'
+                : 'Create your first test case to start documenting your tests.'}
+            </p>
+            {!options.deleted && (
+              <Button
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="mt-4"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Create Test Case
+              </Button>
+            )}
+          </div>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {cases.map((testCase) => {
+          const currentVersion =
+            testCase.currentVersion || testCase.versions?.[0];
+          if (!currentVersion) return null;
+
+          return (
+            <Card key={testCase.id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base">
+                        {currentVersion.title}
+                      </CardTitle>
+                      <Badge
+                        className={getPriorityColor(currentVersion.priority)}
+                      >
+                        {currentVersion.priority}
+                      </Badge>
+                      {getStatusIcon(currentVersion.status)}
+                    </div>
+                    {currentVersion.description && (
+                      <CardDescription>
+                        {currentVersion.description}
+                      </CardDescription>
+                    )}
+                  </div>
+                  {options.deleted ? (
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          restoreTestCase.mutate({ id: testCase.id })
+                        }
+                        disabled={restoreTestCase.isPending}
+                      >
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        Restore
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() =>
+                          setPermanentDeleteTarget({
+                            id: testCase.id,
+                            title: currentVersion.title,
+                          })
+                        }
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Permanently delete
+                      </Button>
+                    </div>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => openEditDialog(testCase)}
+                        >
+                          <Edit className="mr-2 h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => openImproveDialog(testCase)}
+                        >
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          Improve with AI
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setAutomationDialog({
+                              testCaseId: testCase.id,
+                              sourceTestCaseVersionId: currentVersion.id,
+                              sourceVersionNumber: currentVersion.versionNumber,
+                              canGenerate: currentVersion.status === 'ready',
+                            })
+                          }
+                        >
+                          <Code2 className="mr-2 h-4 w-4" />
+                          Playwright automation
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            deleteTestCase.mutate({ id: testCase.id })
+                          }
+                          className="text-destructive focus:text-destructive"
+                          disabled={deleteTestCase.isPending}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                {currentVersion.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-2">
+                    {currentVersion.tags.map((tag) => (
+                      <Badge key={tag} variant="outline" className="text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {currentVersion.prerequisites.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium mb-2">
+                        Prerequisites:
+                      </h4>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                        {currentVersion.prerequisites.map(
+                          (prerequisite, index) => (
+                            <li key={index}>{prerequisite}</li>
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">Steps:</h4>
+                    <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                      {currentVersion.steps.map((step, index) => (
+                        <li key={index}>
+                          {step.action}
+                          {step.expectedResult && (
+                            <div className="ml-5 text-xs">
+                              Expected: {step.expectedResult}
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  {currentVersion.expectedResult && (
+                    <div>
+                      <h4 className="text-sm font-medium mb-1">
+                        Expected Result:
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        {currentVersion.expectedResult}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    );
   };
 
   if (isLoadingSuite || isLoadingProduct) {
@@ -939,179 +1168,78 @@ export function TestSuitePage() {
           <TabsTrigger value="all">All Test Cases</TabsTrigger>
           <TabsTrigger value="ready">Ready</TabsTrigger>
           <TabsTrigger value="draft">Draft</TabsTrigger>
+          <TabsTrigger value="deleted">Deleted</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="space-y-4">
-          {isLoadingCases ? (
-            <div className="space-y-4">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-32" />
-              ))}
-            </div>
-          ) : testCases && testCases.length > 0 ? (
-            <div className="space-y-4">
-              {testCases.map((testCase) => {
-                const currentVersion =
-                  testCase.currentVersion || testCase.versions?.[0];
-                if (!currentVersion) return null;
-
-                return (
-                  <Card key={testCase.id}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <CardTitle className="text-base">
-                              {currentVersion.title}
-                            </CardTitle>
-                            <Badge
-                              className={getPriorityColor(
-                                currentVersion.priority,
-                              )}
-                            >
-                              {currentVersion.priority}
-                            </Badge>
-                            {getStatusIcon(currentVersion.status)}
-                          </div>
-                          {currentVersion.description && (
-                            <CardDescription>
-                              {currentVersion.description}
-                            </CardDescription>
-                          )}
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => openEditDialog(testCase)}
-                            >
-                              <Edit className="mr-2 h-4 w-4" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => openImproveDialog(testCase)}
-                            >
-                              <Sparkles className="mr-2 h-4 w-4" />
-                              Improve with AI
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                setAutomationDialog({
-                                  testCaseId: testCase.id,
-                                  sourceTestCaseVersionId: currentVersion.id,
-                                  sourceVersionNumber:
-                                    currentVersion.versionNumber,
-                                  canGenerate:
-                                    currentVersion.status === 'ready',
-                                })
-                              }
-                            >
-                              <Code2 className="mr-2 h-4 w-4" />
-                              Playwright automation
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                deleteTestCase.mutate({ id: testCase.id })
-                              }
-                              className="text-destructive focus:text-destructive"
-                              disabled={deleteTestCase.isPending}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      {currentVersion.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-2">
-                          {currentVersion.tags.map((tag) => (
-                            <Badge
-                              key={tag}
-                              variant="outline"
-                              className="text-xs"
-                            >
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {currentVersion.prerequisites.length > 0 && (
-                          <div>
-                            <h4 className="text-sm font-medium mb-2">
-                              Prerequisites:
-                            </h4>
-                            <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                              {currentVersion.prerequisites.map(
-                                (prerequisite, idx) => (
-                                  <li key={idx}>{prerequisite}</li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                        )}
-                        <div>
-                          <h4 className="text-sm font-medium mb-2">Steps:</h4>
-                          <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-                            {currentVersion.steps.map((step, idx) => (
-                              <li key={idx}>
-                                {step.action}
-                                {step.expectedResult && (
-                                  <div className="ml-5 text-xs">
-                                    Expected: {step.expectedResult}
-                                  </div>
-                                )}
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                        {currentVersion.expectedResult && (
-                          <div>
-                            <h4 className="text-sm font-medium mb-1">
-                              Expected Result:
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              {currentVersion.expectedResult}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          ) : (
-            <Card className="p-8">
-              <div className="text-center space-y-3">
-                <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
-                <h3 className="text-lg font-medium">No test cases yet</h3>
-                <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-                  Create your first test case to start documenting your tests.
-                  Each test case can have multiple steps and versions.
-                </p>
-                <Button
-                  onClick={() => setIsCreateDialogOpen(true)}
-                  className="mt-4"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Test Case
-                </Button>
-              </div>
-            </Card>
+          {renderTestCaseList(testCases, { loading: isLoadingCases })}
+        </TabsContent>
+        <TabsContent value="ready" className="space-y-4">
+          {renderTestCaseList(
+            testCases?.filter(
+              (testCase) => testCase.currentVersion?.status === 'ready',
+            ),
+            { loading: isLoadingCases },
           )}
         </TabsContent>
+        <TabsContent value="draft" className="space-y-4">
+          {renderTestCaseList(
+            testCases?.filter(
+              (testCase) => testCase.currentVersion?.status === 'draft',
+            ),
+            { loading: isLoadingCases },
+          )}
+        </TabsContent>
+        <TabsContent value="deleted" className="space-y-4">
+          {renderTestCaseList(deletedTestCases, {
+            deleted: true,
+            loading: isLoadingDeletedCases,
+          })}
+        </TabsContent>
       </Tabs>
+      <Dialog
+        open={permanentDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !permanentlyDeleteTestCase.isPending) {
+            setPermanentDeleteTarget(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Permanently delete test case?</DialogTitle>
+            <DialogDescription>
+              “{permanentDeleteTarget?.title}” and all of its versions,
+              automations, execution history, and repair records will be
+              permanently deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPermanentDeleteTarget(null)}
+              disabled={permanentlyDeleteTestCase.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (permanentDeleteTarget) {
+                  permanentlyDeleteTestCase.mutate({
+                    id: permanentDeleteTarget.id,
+                  });
+                }
+              }}
+              disabled={permanentlyDeleteTestCase.isPending}
+            >
+              {permanentlyDeleteTestCase.isPending
+                ? 'Deleting...'
+                : 'Permanently delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {aiDialog && (
         <AiTestCaseDialog
           open

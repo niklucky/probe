@@ -25,7 +25,10 @@ export function createTestCaseService(
   authorization: AuthorizationService,
 ) {
   return {
-    async list(input: { suiteId: number; versionId?: number }, userId: number) {
+    async list(
+      input: { suiteId: number; versionId?: number; deleted?: boolean },
+      userId: number,
+    ) {
       await authorization.require(
         userId,
         { type: 'suite', id: input.suiteId },
@@ -37,14 +40,23 @@ export function createTestCaseService(
           throw new AppError('NOT_FOUND', 'Suite version not found');
         }
         const versions = await repository.listBySuiteVersion(input.versionId);
-        return versions.map(({ testCase, ...version }) => ({
-          ...testCase,
-          versions: [normalizeVersion(version)],
-          currentVersion: normalizeVersion(version),
-        }));
+        return versions
+          .filter(({ testCase }) =>
+            input.deleted
+              ? testCase.deletedAt !== null
+              : testCase.deletedAt === null,
+          )
+          .map(({ testCase, ...version }) => ({
+            ...testCase,
+            versions: [normalizeVersion(version)],
+            currentVersion: normalizeVersion(version),
+          }));
       }
 
-      const testCases = await repository.listCurrentBySuite(input.suiteId);
+      const testCases = await repository.listCurrentBySuite(
+        input.suiteId,
+        input.deleted,
+      );
       return testCases.map((testCase) => ({
         ...testCase,
         versions: testCase.versions.map(normalizeVersion),
@@ -202,7 +214,29 @@ export function createTestCaseService(
 
     async delete(id: number, userId: number) {
       await authorization.require(userId, { type: 'case', id }, 'author');
-      await repository.delete(id);
+      await repository.softDelete(id);
+      return { success: true };
+    },
+
+    async restore(id: number, userId: number) {
+      await authorization.require(userId, { type: 'case', id }, 'author');
+      await repository.restore(id);
+      return { success: true };
+    },
+
+    async permanentlyDelete(id: number, userId: number) {
+      await authorization.require(userId, { type: 'case', id }, 'author');
+      const testCase = await repository.findById(id);
+      if (!testCase) {
+        throw new AppError('NOT_FOUND', 'Test case not found');
+      }
+      if (!testCase.deletedAt) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'Test case must be deleted before it can be permanently deleted',
+        );
+      }
+      await repository.permanentlyDelete(id);
       return { success: true };
     },
   };

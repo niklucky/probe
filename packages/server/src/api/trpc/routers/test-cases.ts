@@ -1,6 +1,8 @@
 import {
   createTestCaseInputSchema,
   deleteTestCaseInputSchema,
+  restoreTestCaseInputSchema,
+  permanentlyDeleteTestCaseInputSchema,
   getTestCaseInputSchema,
   getTestCaseVersionsInputSchema,
   listTestCasesByProductInputSchema,
@@ -62,5 +64,19 @@ export const testCasesRouter = router({
     .output(z.object({ success: z.boolean() }))
     .mutation(({ ctx, input }) =>
       ctx.services.testCases.delete(input.id, ctx.user.id),
+    ),
+
+  restore: protectedProcedure
+    .input(restoreTestCaseInputSchema)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(({ ctx, input }) =>
+      ctx.services.testCases.restore(input.id, ctx.user.id),
+    ),
+
+  permanentlyDelete: protectedProcedure
+    .input(permanentlyDeleteTestCaseInputSchema)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(({ ctx, input }) =>
+      ctx.services.testCases.permanentlyDelete(input.id, ctx.user.id),
     ),
 });

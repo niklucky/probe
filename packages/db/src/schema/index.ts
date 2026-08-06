@@ -522,6 +522,7 @@ export const testCases = pgTable('test_cases', {
     .notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at'),
 });
 
 // Test case versions
@@ -629,7 +630,7 @@ export const testAutomations = pgTable(
       .references(() => testCases.id, { onDelete: 'cascade' })
       .notNull(),
     sourceTestCaseVersionId: integer('source_test_case_version_id')
-      .references(() => testCaseVersions.id, { onDelete: 'restrict' })
+      .references(() => testCaseVersions.id, { onDelete: 'cascade' })
       .notNull(),
     environmentId: integer('environment_id')
       .references(() => environments.id, { onDelete: 'restrict' })
@@ -696,7 +697,7 @@ export const automationExecutionJobs = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' })
       .notNull(),
     automationId: integer('automation_id')
-      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .references(() => testAutomations.id, { onDelete: 'cascade' })
       .notNull(),
     environmentId: integer('environment_id')
       .references(() => environments.id, { onDelete: 'restrict' })
@@ -800,10 +801,10 @@ export const automationRepairSessions = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' })
       .notNull(),
     sourceExecutionId: integer('source_execution_id')
-      .references(() => automationExecutionJobs.id, { onDelete: 'restrict' })
+      .references(() => automationExecutionJobs.id, { onDelete: 'cascade' })
       .notNull(),
     sourceAutomationId: integer('source_automation_id')
-      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .references(() => testAutomations.id, { onDelete: 'cascade' })
       .notNull(),
     requestedById: integer('requested_by_id')
       .references(() => users.id)
@@ -844,11 +845,11 @@ export const automationRepairAttempts = pgTable(
       .notNull(),
     attemptNumber: integer('attempt_number').notNull(),
     candidateAutomationId: integer('candidate_automation_id')
-      .references(() => testAutomations.id, { onDelete: 'restrict' })
+      .references(() => testAutomations.id, { onDelete: 'cascade' })
       .notNull(),
     executionJobId: integer('execution_job_id').references(
       () => automationExecutionJobs.id,
-      { onDelete: 'restrict' },
+      { onDelete: 'cascade' },
     ),
     status: automationRepairAttemptStatusEnum('status')
       .notNull()

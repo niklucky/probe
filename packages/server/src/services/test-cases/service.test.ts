@@ -19,6 +19,7 @@ describe('test case service', () => {
           createdById: 2,
           createdAt: new Date(),
           updatedAt: new Date(),
+          deletedAt: null,
         };
       },
       async createCase() {
@@ -30,6 +31,7 @@ describe('test case service', () => {
           createdById: 2,
           createdAt: new Date(),
           updatedAt: new Date(),
+          deletedAt: null,
         };
       },
       async createVersion(
@@ -62,6 +64,7 @@ describe('test case service', () => {
           createdById: 2,
           createdAt: new Date(),
           updatedAt: new Date(),
+          deletedAt: null,
         };
       },
     };
@@ -113,5 +116,67 @@ describe('test case service', () => {
     expect(result.currentVersion.id).toBe(17);
     expect(result.currentVersion.suiteVersionId).toBe(11);
     expect(result.currentVersion.status).toBe('ready');
+  });
+
+  test('soft deletes, restores, and permanently deletes a deleted case', async () => {
+    const calls: string[] = [];
+    const repository = {
+      async softDelete() {
+        calls.push('softDelete');
+      },
+      async restore() {
+        calls.push('restore');
+      },
+      async findById() {
+        calls.push('findById');
+        return { deletedAt: new Date() };
+      },
+      async permanentlyDelete() {
+        calls.push('permanentlyDelete');
+      },
+    };
+    const authorization = {
+      async require() {
+        calls.push('authorize');
+      },
+    };
+    const service = createTestCaseService(
+      repository as never,
+      authorization as never,
+    );
+
+    await service.delete(13, 2);
+    await service.restore(13, 2);
+    await service.permanentlyDelete(13, 2);
+
+    expect(calls).toEqual([
+      'authorize',
+      'softDelete',
+      'authorize',
+      'restore',
+      'authorize',
+      'findById',
+      'permanentlyDelete',
+    ]);
+  });
+
+  test('refuses to permanently delete an active case', async () => {
+    let permanentlyDeleted = false;
+    const service = createTestCaseService(
+      {
+        async findById() {
+          return { deletedAt: null };
+        },
+        async permanentlyDelete() {
+          permanentlyDeleted = true;
+        },
+      } as never,
+      { async require() {} } as never,
+    );
+
+    await expect(service.permanentlyDelete(13, 2)).rejects.toThrow(
+      'Test case must be deleted before it can be permanently deleted',
+    );
+    expect(permanentlyDeleted).toBe(false);
   });
 });

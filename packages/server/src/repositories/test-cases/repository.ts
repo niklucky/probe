@@ -1,7 +1,10 @@
 import {
   db,
+  and,
   desc,
   eq,
+  isNotNull,
+  isNull,
   testCases,
   testCaseVersions,
   testSuites,
@@ -20,9 +23,14 @@ function bindTestCaseRepository(database: Database) {
       });
     },
 
-    async listCurrentBySuite(suiteId: number) {
+    async listCurrentBySuite(suiteId: number, deleted = false) {
       return await database.query.testCases.findMany({
-        where: eq(testCases.suiteId, suiteId),
+        where: and(
+          eq(testCases.suiteId, suiteId),
+          deleted
+            ? isNotNull(testCases.deletedAt)
+            : isNull(testCases.deletedAt),
+        ),
         with: {
           versions: {
             orderBy: desc(testCaseVersions.versionNumber),
@@ -108,7 +116,21 @@ function bindTestCaseRepository(database: Database) {
       });
     },
 
-    async delete(id: number) {
+    async softDelete(id: number) {
+      await database
+        .update(testCases)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(testCases.id, id));
+    },
+
+    async restore(id: number) {
+      await database
+        .update(testCases)
+        .set({ deletedAt: null, updatedAt: new Date() })
+        .where(eq(testCases.id, id));
+    },
+
+    async permanentlyDelete(id: number) {
       await database.delete(testCases).where(eq(testCases.id, id));
     },
   };
