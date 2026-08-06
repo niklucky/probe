@@ -89,9 +89,11 @@ function formatDateTimeLocal(value: string | Date) {
 }
 
 export function EnvironmentsPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const id = Number(projectId);
-  const [productId, setProductId] = useState<number | undefined>();
+  const { projectId, productId: productIdParam } = useParams<{
+    projectId: string;
+    productId: string;
+  }>();
+  const productId = Number(productIdParam);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -130,10 +132,9 @@ export function EnvironmentsPage() {
     useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [profileError, setProfileError] = useState('');
-  const input = { projectId: id, productId };
+  const input = { productId };
 
-  const { data: project } = trpc.projects.get.useQuery({ id });
-  const { data: products } = trpc.products.list.useQuery({ projectId: id });
+  const { data: product } = trpc.products.get.useQuery({ id: productId });
   const { data: environments } = trpc.environments.list.useQuery(input);
   const variablesInput = {
     environmentId: variablesEnvironment?.id ?? 0,
@@ -297,7 +298,6 @@ export function EnvironmentsPage() {
       updateEnvironment.mutate({ id: editingId, ...form });
     } else {
       createEnvironment.mutate({
-        projectId: id,
         productId,
         ...form,
       });
@@ -469,7 +469,7 @@ export function EnvironmentsPage() {
             setForm({ ...form, isDefault: checked === true })
           }
         />
-        <Label htmlFor="environment-default">Default for this scope</Label>
+        <Label htmlFor="environment-default">Default for this product</Label>
       </div>
     </div>
   );
@@ -479,8 +479,10 @@ export function EnvironmentsPage() {
       <div className="flex items-start justify-between">
         <div>
           <div className="flex gap-2 text-sm text-muted-foreground">
-            <Link to={`/projects/${projectId}`}>
-              {project?.name || 'Project'}
+            <Link to={`/projects/${projectId}`}>Project</Link>
+            <span>/</span>
+            <Link to={`/projects/${projectId}/products/${productId}`}>
+              {product?.name || 'Product'}
             </Link>
             <span>/</span>
             <span>Environments</span>
@@ -492,7 +494,7 @@ export function EnvironmentsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" asChild>
-            <Link to={`/projects/${projectId}`}>
+            <Link to={`/projects/${projectId}/products/${productId}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back
             </Link>
@@ -509,7 +511,8 @@ export function EnvironmentsPage() {
                 <DialogHeader>
                   <DialogTitle>Add environment</DialogTitle>
                   <DialogDescription>
-                    This environment will belong to the selected scope.
+                    This environment will belong to{' '}
+                    {product?.name || 'this product'}.
                   </DialogDescription>
                 </DialogHeader>
                 {formFields}
@@ -523,33 +526,6 @@ export function EnvironmentsPage() {
           </Dialog>
         </div>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Scope</CardTitle>
-          <CardDescription>
-            Choose project-wide environments or a specific product.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <select
-            className="flex h-9 w-full max-w-sm rounded-md border border-input bg-transparent px-3 text-sm"
-            value={productId ?? ''}
-            onChange={(event) =>
-              setProductId(
-                event.target.value ? Number(event.target.value) : undefined,
-              )
-            }
-          >
-            <option value="">Project-wide</option>
-            {products?.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.name}
-              </option>
-            ))}
-          </select>
-        </CardContent>
-      </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         {environments?.map((environment) => (

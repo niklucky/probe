@@ -48,13 +48,15 @@ export function createAuthorizationRepository(database: Database = db) {
             columns: { projectId: true },
           })
         )?.projectId;
-      case 'environment':
-        return (
-          await database.query.environments.findFirst({
-            where: eq(environments.id, resource.id),
-            columns: { projectId: true },
-          })
-        )?.projectId;
+      case 'environment': {
+        const [row] = await database
+          .select({ projectId: products.projectId })
+          .from(environments)
+          .innerJoin(products, eq(environments.productId, products.id))
+          .where(eq(environments.id, resource.id))
+          .limit(1);
+        return row?.projectId;
+      }
       case 'team':
         return (
           await database.query.teams.findFirst({

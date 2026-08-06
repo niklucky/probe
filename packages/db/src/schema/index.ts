@@ -174,12 +174,9 @@ export const environments = pgTable(
   'environments',
   {
     id: serial('id').primaryKey(),
-    projectId: integer('project_id')
-      .references(() => projects.id, { onDelete: 'cascade' })
+    productId: integer('product_id')
+      .references(() => products.id, { onDelete: 'cascade' })
       .notNull(),
-    productId: integer('product_id').references(() => products.id, {
-      onDelete: 'cascade',
-    }),
     name: varchar('name', { length: 255 }).notNull(),
     type: environmentTypeEnum('type').notNull(),
     baseUrl: varchar('base_url', { length: 2048 }).notNull(),
@@ -191,7 +188,6 @@ export const environments = pgTable(
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    projectIndex: index('environments_project_index').on(table.projectId),
     productIndex: index('environments_product_index').on(table.productId),
   }),
 );
@@ -1005,7 +1001,6 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   products: many(products),
   teams: many(teams),
-  environments: many(environments),
   automationExecutionJobs: many(automationExecutionJobs),
   automationRepairSessions: many(automationRepairSessions),
 }));
@@ -1022,10 +1017,6 @@ export const productsRelations = relations(products, ({ one, many }) => ({
 export const environmentsRelations = relations(
   environments,
   ({ one, many }) => ({
-    project: one(projects, {
-      fields: [environments.projectId],
-      references: [projects.id],
-    }),
     product: one(products, {
       fields: [environments.productId],
       references: [products.id],

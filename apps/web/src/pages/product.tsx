@@ -36,7 +36,8 @@ import {
   MoreVertical,
   Edit,
   Trash2,
-  CheckCircle
+  CheckCircle,
+  Settings
 } from 'lucide-react';
 
 export function ProductPage() {
@@ -170,12 +171,20 @@ export function ProductPage() {
           )}
           <Badge variant="secondary" className="mt-2">{product.type}</Badge>
         </div>
-        <Button variant="outline" asChild>
-          <Link to={`/projects/${projectId}`}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Project
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link to={`/projects/${projectId}/products/${productId}/environments`}>
+              <Settings className="mr-2 h-4 w-4" />
+              Environments
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to={`/projects/${projectId}`}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Project
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Test Suites Section */}

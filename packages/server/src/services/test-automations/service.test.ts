@@ -43,7 +43,6 @@ const testCase = {
 
 const environment = {
   id: 8,
-  projectId: 4,
   productId: 9,
   name: 'Staging',
   type: 'staging' as const,

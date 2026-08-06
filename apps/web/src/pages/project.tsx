@@ -196,12 +196,6 @@ export function ProjectPage() {
             </p>
           )}
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${projectId}/environments`}>
-            <Settings className="mr-2 h-4 w-4" />
-            Environments
-          </Link>
-        </Button>
       </div>
 
       {/* Stats Overview */}

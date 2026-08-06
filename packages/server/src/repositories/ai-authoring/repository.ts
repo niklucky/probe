@@ -1,9 +1,18 @@
-import { aiAuthoringJobs, db, eq } from '@probe/db';
+import { aiAuthoringJobs, db, eq, testSuites } from '@probe/db';
 
 type Database = typeof db;
 
 export function createAiAuthoringRepository(database: Database = db) {
   return {
+    async findSuiteProductId(id: number) {
+      return (
+        await database.query.testSuites.findFirst({
+          where: eq(testSuites.id, id),
+          columns: { productId: true },
+        })
+      )?.productId;
+    },
+
     async create(values: typeof aiAuthoringJobs.$inferInsert) {
       const [job] = await database
         .insert(aiAuthoringJobs)

@@ -28,17 +28,6 @@ export function createEnvironmentService(
   authorization: AuthorizationService,
   cipher: EnvironmentVariableCipher,
 ) {
-  async function requireProductInProject(
-    productId: number | undefined,
-    projectId: number,
-  ) {
-    if (!productId) return;
-    const product = await repository.findProduct(productId);
-    if (!product || product.projectId !== projectId) {
-      throw new AppError('NOT_FOUND', 'Product not found');
-    }
-  }
-
   function publicVariable<
     T extends {
       id: number;
@@ -277,28 +266,27 @@ export function createEnvironmentService(
       return environment;
     },
 
-    async list(
-      input: { projectId: number; productId?: number },
-      userId: number,
-    ) {
-      await authorization.requireProject(userId, input.projectId, 'read');
-      await requireProductInProject(input.productId, input.projectId);
-      return repository.list(input.projectId, input.productId);
+    async list(input: { productId: number }, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'product', id: input.productId },
+        'read',
+      );
+      return repository.list(input.productId);
     },
 
     async create(input: CreateEnvironmentInput, userId: number) {
-      await authorization.requireProject(userId, input.projectId, 'author');
-      await requireProductInProject(input.productId, input.projectId);
+      await authorization.require(
+        userId,
+        { type: 'product', id: input.productId },
+        'author',
+      );
       return repository.withTransaction(async (transactionRepository) => {
         if (input.isDefault) {
-          await transactionRepository.clearDefault(
-            input.projectId,
-            input.productId,
-          );
+          await transactionRepository.clearDefault(input.productId);
         }
         const environment = await transactionRepository.create({
           ...input,
-          productId: input.productId ?? null,
           createdById: userId,
         });
         await transactionRepository.createProfile(
@@ -531,9 +519,6 @@ export function createEnvironmentService(
       );
       const current = await repository.find(input.id);
       if (!current) throw new AppError('NOT_FOUND', 'Environment not found');
-      const productId =
-        input.productId === undefined ? current.productId : input.productId;
-      await requireProductInProject(productId ?? undefined, current.projectId);
       const { id, ...updates } = input;
       if (updates.baseUrl) {
         for (const cookie of await repository.listCookies(id)) {
@@ -551,15 +536,9 @@ export function createEnvironmentService(
       }
       return repository.withTransaction(async (transactionRepository) => {
         if (updates.isDefault) {
-          await transactionRepository.clearDefault(
-            current.projectId,
-            productId,
-          );
+          await transactionRepository.clearDefault(current.productId);
         }
-        const environment = await transactionRepository.update(id, {
-          ...updates,
-          productId,
-        });
+        const environment = await transactionRepository.update(id, updates);
         if (!environment) {
           throw new AppError('NOT_FOUND', 'Environment not found');
         }

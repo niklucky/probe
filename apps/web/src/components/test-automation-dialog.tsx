@@ -28,7 +28,6 @@ import {
 interface TestAutomationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectId: number;
   productId: number;
   testCaseId: number;
   sourceTestCaseVersionId: number;
@@ -39,7 +38,6 @@ interface TestAutomationDialogProps {
 export function TestAutomationDialog({
   open,
   onOpenChange,
-  projectId,
   productId,
   testCaseId,
   sourceTestCaseVersionId,
@@ -58,7 +56,7 @@ export function TestAutomationDialog({
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
-    { projectId, productId },
+    { productId },
     { enabled: open },
   );
   const { data: connections = [] } = trpc.aiConnections.available.useQuery(

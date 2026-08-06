@@ -167,6 +167,36 @@ describe('AI test-case authoring', () => {
     expect(failures[0]?.[0]).toBe('INVALID_RESPONSE');
   });
 
+  test('rejects an environment owned by another product', async () => {
+    const service = createAiAuthoringService(
+      {
+        async findSuiteProductId() {
+          return 9;
+        },
+      } as never,
+      { async require() {} } as never,
+      {} as never,
+      {} as never,
+      {
+        async get() {
+          return { id: 8, productId: 10 };
+        },
+      } as never,
+    );
+
+    await expect(
+      service.request(
+        {
+          operation: 'generate',
+          suiteId: 7,
+          description: 'Reset a password',
+          environmentId: 8,
+        },
+        2,
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   test('accepts a validated proposal through normal versioning as the actor', async () => {
     const createCalls: unknown[][] = [];
     const acceptedBy: number[] = [];

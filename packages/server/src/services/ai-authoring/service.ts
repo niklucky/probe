@@ -161,7 +161,7 @@ export function createAiAuthoringService(
 
   return {
     async request(input: RequestAiTestCaseProposalInput, userId: number) {
-      const suiteAccess = await authorization.require(
+      await authorization.require(
         userId,
         {
           type: input.operation === 'improve' ? 'case' : 'suite',
@@ -177,12 +177,10 @@ export function createAiAuthoringService(
         ? await environments.get(input.environmentId, userId)
         : undefined;
       if (environment) {
-        const environmentAccess = await authorization.require(
-          userId,
-          { type: 'environment', id: environment.id },
-          'read',
+        const suiteProductId = await repository.findSuiteProductId(
+          input.suiteId,
         );
-        if (environmentAccess.projectId !== suiteAccess.projectId) {
+        if (environment.productId !== suiteProductId) {
           throw new NotFoundError('Environment not found');
         }
       }

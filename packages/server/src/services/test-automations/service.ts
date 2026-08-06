@@ -137,7 +137,7 @@ export function createTestAutomationService(
 ) {
   return {
     async generate(input: GenerateTestAutomationInput, userId: number) {
-      const access = await authorization.require(
+      await authorization.require(
         userId,
         { type: 'case', id: input.testCaseId },
         'author',
@@ -160,11 +160,7 @@ export function createTestAutomationService(
       }
 
       const environment = await environments.get(input.environmentId, userId);
-      if (
-        environment.projectId !== access.projectId ||
-        (environment.productId &&
-          environment.productId !== testCase.suite.productId)
-      ) {
+      if (environment.productId !== testCase.suite.productId) {
         throw new NotFoundError('Environment not found');
       }
       const profile = await environments.getEnabledProfile(

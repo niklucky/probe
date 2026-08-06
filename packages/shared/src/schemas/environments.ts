@@ -26,7 +26,6 @@ const baseUrlSchema = z
 
 export const environmentSchema = createSelectSchema(environments).pick({
   id: true,
-  projectId: true,
   productId: true,
   name: true,
   type: true,
@@ -38,13 +37,11 @@ export const environmentSchema = createSelectSchema(environments).pick({
 });
 
 export const listEnvironmentsInputSchema = z.object({
-  projectId: z.number().int().positive(),
-  productId: z.number().int().positive().optional(),
+  productId: z.number().int().positive(),
 });
 
 export const createEnvironmentInputSchema = environmentInsertSchema
   .pick({
-    projectId: true,
     productId: true,
     name: true,
     type: true,
@@ -53,12 +50,12 @@ export const createEnvironmentInputSchema = environmentInsertSchema
   .extend({
     name: z.string().trim().min(1).max(255),
     baseUrl: baseUrlSchema,
-    productId: z.number().int().positive().optional(),
+    productId: z.number().int().positive(),
     isDefault: z.boolean().default(false),
   });
 
 export const updateEnvironmentInputSchema = createEnvironmentInputSchema
-  .omit({ projectId: true })
+  .omit({ productId: true })
   .partial()
   .extend({ id: z.number().int().positive() });
 

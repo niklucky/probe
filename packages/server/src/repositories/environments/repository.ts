@@ -10,27 +10,17 @@ import {
   environmentVariables,
   environments,
   eq,
-  isNull,
   inArray,
-  products,
   sql,
 } from '@probe/db';
 
 type Database = typeof db;
 
 function bindEnvironmentRepository(database: Database) {
-  const scopeWhere = (projectId: number, productId?: number | null) =>
-    and(
-      eq(environments.projectId, projectId),
-      productId
-        ? eq(environments.productId, productId)
-        : isNull(environments.productId),
-    );
-
   return {
-    list(projectId: number, productId?: number) {
+    list(productId: number) {
       return database.query.environments.findMany({
-        where: scopeWhere(projectId, productId),
+        where: eq(environments.productId, productId),
         orderBy: (table, { desc, asc }) => [
           desc(table.isDefault),
           asc(table.name),
@@ -315,17 +305,11 @@ function bindEnvironmentRepository(database: Database) {
         .returning();
       return variable;
     },
-    findProduct(id: number) {
-      return database.query.products.findFirst({
-        where: eq(products.id, id),
-        columns: { id: true, projectId: true },
-      });
-    },
-    async clearDefault(projectId: number, productId?: number | null) {
+    async clearDefault(productId: number) {
       await database
         .update(environments)
         .set({ isDefault: false, updatedAt: new Date() })
-        .where(scopeWhere(projectId, productId));
+        .where(eq(environments.productId, productId));
     },
     async create(values: typeof environments.$inferInsert) {
       const [environment] = await database

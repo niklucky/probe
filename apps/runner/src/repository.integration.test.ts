@@ -57,7 +57,6 @@ integrationTest(
       const [environment] = await db
         .insert(environments)
         .values({
-          projectId: project!.id,
           productId: product!.id,
           name: 'Test',
           type: 'staging',

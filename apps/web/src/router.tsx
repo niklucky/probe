@@ -49,7 +49,7 @@ export const router = createBrowserRouter([
         element: <TeamsPage />,
       },
       {
-        path: 'projects/:projectId/environments',
+        path: 'projects/:projectId/products/:productId/environments',
         element: <EnvironmentsPage />,
       },
       {

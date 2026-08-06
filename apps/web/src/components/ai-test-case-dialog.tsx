@@ -24,7 +24,6 @@ interface AiTestCaseDialogProps {
   onOpenChange: (open: boolean) => void;
   mode: Mode;
   suiteId: number;
-  projectId: number;
   productId: number;
   testCaseId?: number;
   currentSpec?: TestSpec;
@@ -65,7 +64,6 @@ export function AiTestCaseDialog({
   onOpenChange,
   mode,
   suiteId,
-  projectId,
   productId,
   testCaseId,
   currentSpec,
@@ -84,7 +82,7 @@ export function AiTestCaseDialog({
     { enabled: open },
   );
   const { data: environments = [] } = trpc.environments.list.useQuery(
-    { projectId, productId },
+    { productId },
     { enabled: open },
   );
 

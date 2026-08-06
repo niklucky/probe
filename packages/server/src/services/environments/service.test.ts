@@ -17,8 +17,7 @@ function fixture(
   const profiles: Array<Record<string, any>> = [];
   const environment = {
     id: 7,
-    projectId: 2,
-    productId: null,
+    productId: 5,
     baseUrl: 'https://staging.example.test',
     isDefault: false,
   };
@@ -261,13 +260,13 @@ function fixture(
       if (options.denyAuthorization) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
-      return { projectId: environment.projectId, role: 'qa' as const };
+      return { projectId: 2, role: 'qa' as const };
     },
     async requireProject() {
       if (options.denyAuthorization) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
-      return { projectId: environment.projectId, role: 'qa' as const };
+      return { projectId: 2, role: 'qa' as const };
     },
   };
   const service = createEnvironmentService(
@@ -665,7 +664,7 @@ describe('environment profile service', () => {
     const { service, profiles } = fixture();
     await service.create(
       {
-        projectId: 2,
+        productId: 5,
         name: 'Staging',
         type: 'staging',
         baseUrl: 'https://staging.example.test',
@@ -836,7 +835,7 @@ describe('environment profile service', () => {
     );
     await service.create(
       {
-        projectId: 2,
+        productId: 5,
         name: 'Staging',
         type: 'staging',
         baseUrl: 'https://staging.example.test',

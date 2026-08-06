@@ -1120,7 +1120,6 @@ export function TestSuitePage() {
           }}
           mode={aiDialog.mode}
           suiteId={Number(suiteId)}
-          projectId={Number(projectId)}
           productId={Number(productId)}
           testCaseId={aiDialog.testCaseId}
           currentSpec={aiDialog.currentSpec}
@@ -1135,7 +1134,6 @@ export function TestSuitePage() {
           onOpenChange={(nextOpen) => {
             if (!nextOpen) setAutomationDialog(null);
           }}
-          projectId={Number(projectId)}
           productId={Number(productId)}
           {...automationDialog}
         />
