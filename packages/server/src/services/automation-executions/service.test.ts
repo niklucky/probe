@@ -5,6 +5,9 @@ const automation = {
   id: 7,
   status: 'accepted' as const,
   environmentId: 9,
+  environmentProfileId: 5,
+  environmentProfileRevision: 2,
+  source: 'console.log(process.env.username)',
   testCase: {
     suite: {
       product: { projectId: 3 },
@@ -40,6 +43,19 @@ describe('automation execution API service', () => {
           return { projectId: 3, role: 'qa' };
         },
       } as never,
+      {
+        async getEnabledProfile() {
+          return {
+            id: 5,
+            environmentId: 9,
+            name: 'Authenticated User',
+            revision: 2,
+          };
+        },
+        async listProfileVariableMetadata() {
+          return [{ key: 'username' }];
+        },
+      } as never,
       {} as never,
       'private-artifacts',
       defaults,
@@ -48,6 +64,7 @@ describe('automation execution API service', () => {
     await service.queue(
       {
         automationId: 7,
+        environmentProfileId: 5,
         timeoutSeconds: 120,
         captureVideo: true,
         applyEnvironmentCookies: false,
@@ -60,6 +77,9 @@ describe('automation execution API service', () => {
       projectId: 3,
       automationId: 7,
       environmentId: 9,
+      environmentProfileId: 5,
+      environmentProfileName: 'Authenticated User',
+      environmentProfileRevision: 2,
       requestedById: 4,
       timeoutSeconds: 120,
       settings: {
@@ -72,6 +92,63 @@ describe('automation execution API service', () => {
     });
     expect(writes[0]).not.toHaveProperty('source');
     expect(JSON.stringify(writes[0])).not.toContain('secret');
+  });
+
+  test('rejects execution with a different or stale profile snapshot', async () => {
+    let profileRevision = 2;
+    const service = createAutomationExecutionService(
+      {
+        async findAutomation() {
+          return automation;
+        },
+        async create() {
+          throw new Error('must not queue');
+        },
+      } as never,
+      { async requireProject() {} } as never,
+      {
+        async getEnabledProfile(id: number) {
+          return {
+            id,
+            environmentId: 9,
+            name: 'Authenticated User',
+            revision: profileRevision,
+          };
+        },
+      } as never,
+      {} as never,
+      'private-artifacts',
+      defaults,
+    );
+
+    await expect(
+      service.queue(
+        {
+          automationId: 7,
+          environmentProfileId: 6,
+          timeoutSeconds: 120,
+          captureVideo: false,
+          applyEnvironmentCookies: true,
+          applyEnvironmentHeaders: true,
+        },
+        4,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    profileRevision = 3;
+    await expect(
+      service.queue(
+        {
+          automationId: 7,
+          environmentProfileId: 5,
+          timeoutSeconds: 120,
+          captureVideo: false,
+          applyEnvironmentCookies: true,
+          applyEnvironmentHeaders: true,
+        },
+        4,
+      ),
+    ).rejects.toThrow('profile changed');
   });
 
   test('does not expose private object names in execution history', async () => {
@@ -98,6 +175,7 @@ describe('automation execution API service', () => {
         },
       } as never,
       { async requireProject() {} } as never,
+      {} as never,
       {} as never,
       'private-artifacts',
       defaults,

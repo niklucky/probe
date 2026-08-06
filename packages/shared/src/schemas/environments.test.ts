@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createEnvironmentCookieInputSchema,
   createEnvironmentHeaderInputSchema,
+  createEnvironmentProfileInputSchema,
   environmentVariableKeySchema,
   extractEnvironmentVariableReferences,
   extractEnvironmentVariableReferencesFromValue,
@@ -42,6 +43,37 @@ describe('environment variable placeholders', () => {
   });
 });
 
+describe('environment profile definitions', () => {
+  const profile = {
+    environmentId: 1,
+    name: 'Authenticated User',
+    enabled: true,
+    variableIds: [1],
+    cookieIds: [],
+    headerIds: [],
+  };
+
+  test('does not accept client control of the Anonymous flag', () => {
+    expect(
+      createEnvironmentProfileInputSchema.parse({
+        ...profile,
+        isAnonymous: true,
+      }),
+    ).not.toHaveProperty('isAnonymous');
+  });
+
+  test('rejects duplicate binding ids', () => {
+    for (const field of ['variableIds', 'cookieIds', 'headerIds'] as const) {
+      expect(
+        createEnvironmentProfileInputSchema.safeParse({
+          ...profile,
+          [field]: [2, 2],
+        }).success,
+      ).toBe(false);
+    }
+  });
+});
+
 describe('environment header definitions', () => {
   const base = {
     environmentId: 1,
@@ -77,8 +109,7 @@ describe('environment header definitions', () => {
       'X-Probe-Internal',
     ]) {
       expect(
-        createEnvironmentHeaderInputSchema.safeParse({ ...base, name })
-          .success,
+        createEnvironmentHeaderInputSchema.safeParse({ ...base, name }).success,
       ).toBe(false);
     }
     expect(

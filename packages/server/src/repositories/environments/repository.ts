@@ -3,11 +3,17 @@ import {
   db,
   environmentCookies,
   environmentHeaders,
+  environmentProfileCookies,
+  environmentProfileHeaders,
+  environmentProfiles,
+  environmentProfileVariables,
   environmentVariables,
   environments,
   eq,
   isNull,
+  inArray,
   products,
+  sql,
 } from '@probe/db';
 
 type Database = typeof db;
@@ -35,6 +41,163 @@ function bindEnvironmentRepository(database: Database) {
       return database.query.environments.findFirst({
         where: eq(environments.id, id),
       });
+    },
+    listProfiles(environmentId: number) {
+      return database.query.environmentProfiles.findMany({
+        where: eq(environmentProfiles.environmentId, environmentId),
+        with: {
+          variables: { columns: { variableId: true } },
+          cookies: { columns: { cookieId: true } },
+          headers: { columns: { headerId: true } },
+        },
+        orderBy: (table, { desc, asc }) => [
+          desc(table.isAnonymous),
+          asc(table.name),
+        ],
+      });
+    },
+    findProfile(id: number) {
+      return database.query.environmentProfiles.findFirst({
+        where: eq(environmentProfiles.id, id),
+        with: {
+          variables: { columns: { variableId: true } },
+          cookies: { columns: { cookieId: true } },
+          headers: { columns: { headerId: true } },
+        },
+      });
+    },
+    async createProfile(
+      values: typeof environmentProfiles.$inferInsert,
+      bindings: {
+        variableIds: number[];
+        cookieIds: number[];
+        headerIds: number[];
+      },
+    ) {
+      const [profile] = await database
+        .insert(environmentProfiles)
+        .values(values)
+        .returning();
+      if (bindings.variableIds.length) {
+        await database.insert(environmentProfileVariables).values(
+          bindings.variableIds.map((variableId) => ({
+            profileId: profile!.id,
+            variableId,
+          })),
+        );
+      }
+      if (bindings.cookieIds.length) {
+        await database.insert(environmentProfileCookies).values(
+          bindings.cookieIds.map((cookieId) => ({
+            profileId: profile!.id,
+            cookieId,
+          })),
+        );
+      }
+      if (bindings.headerIds.length) {
+        await database.insert(environmentProfileHeaders).values(
+          bindings.headerIds.map((headerId) => ({
+            profileId: profile!.id,
+            headerId,
+          })),
+        );
+      }
+      return profile!;
+    },
+    async updateProfile(
+      id: number,
+      values: Partial<typeof environmentProfiles.$inferInsert>,
+      bindings?: {
+        variableIds: number[];
+        cookieIds: number[];
+        headerIds: number[];
+      },
+    ) {
+      if (bindings) {
+        await database
+          .delete(environmentProfileVariables)
+          .where(eq(environmentProfileVariables.profileId, id));
+        await database
+          .delete(environmentProfileCookies)
+          .where(eq(environmentProfileCookies.profileId, id));
+        await database
+          .delete(environmentProfileHeaders)
+          .where(eq(environmentProfileHeaders.profileId, id));
+        if (bindings.variableIds.length) {
+          await database.insert(environmentProfileVariables).values(
+            bindings.variableIds.map((variableId) => ({
+              profileId: id,
+              variableId,
+            })),
+          );
+        }
+        if (bindings.cookieIds.length) {
+          await database.insert(environmentProfileCookies).values(
+            bindings.cookieIds.map((cookieId) => ({
+              profileId: id,
+              cookieId,
+            })),
+          );
+        }
+        if (bindings.headerIds.length) {
+          await database.insert(environmentProfileHeaders).values(
+            bindings.headerIds.map((headerId) => ({
+              profileId: id,
+              headerId,
+            })),
+          );
+        }
+      }
+      const bumpsRevision = bindings !== undefined || values.name !== undefined;
+      const [profile] = await database
+        .update(environmentProfiles)
+        .set({
+          ...values,
+          ...(bumpsRevision
+            ? { revision: sql`${environmentProfiles.revision} + 1` }
+            : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(environmentProfiles.id, id))
+        .returning();
+      return profile;
+    },
+    async deleteProfile(id: number) {
+      const [profile] = await database
+        .delete(environmentProfiles)
+        .where(eq(environmentProfiles.id, id))
+        .returning();
+      return profile;
+    },
+    async bumpProfilesForBinding(
+      kind: 'variable' | 'cookie' | 'header',
+      bindingId: number,
+    ) {
+      const table =
+        kind === 'variable'
+          ? environmentProfileVariables
+          : kind === 'cookie'
+            ? environmentProfileCookies
+            : environmentProfileHeaders;
+      const column =
+        kind === 'variable'
+          ? environmentProfileVariables.variableId
+          : kind === 'cookie'
+            ? environmentProfileCookies.cookieId
+            : environmentProfileHeaders.headerId;
+      const rows = await database
+        .select({ profileId: table.profileId })
+        .from(table)
+        .where(eq(column, bindingId));
+      const profileIds = [...new Set(rows.map(({ profileId }) => profileId))];
+      if (!profileIds.length) return;
+      await database
+        .update(environmentProfiles)
+        .set({
+          revision: sql`${environmentProfiles.revision} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(inArray(environmentProfiles.id, profileIds));
     },
     listCookies(environmentId: number) {
       return database.query.environmentCookies.findMany({

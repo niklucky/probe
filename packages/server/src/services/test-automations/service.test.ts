@@ -54,6 +54,18 @@ const environment = {
   updatedAt: new Date(),
 };
 
+const profile = {
+  id: 6,
+  environmentId: 8,
+  name: 'Authenticated User',
+  isAnonymous: false,
+  enabled: true,
+  revision: 3,
+  variableIds: [1, 2],
+  cookieIds: [],
+  headerIds: [],
+};
+
 const generatedSource = `
 import { test, expect } from '@playwright/test';
 
@@ -72,6 +84,9 @@ function automation(overrides: Record<string, unknown> = {}) {
     testCaseId: 5,
     sourceTestCaseVersionId: 12,
     environmentId: 8,
+    environmentProfileId: 6,
+    environmentProfileName: 'Authenticated User',
+    environmentProfileRevision: 3,
     versionNumber: 1,
     framework: 'playwright' as const,
     language: 'typescript' as const,
@@ -151,7 +166,10 @@ describe('Playwright automation generation', () => {
         async get() {
           return environment;
         },
-        async listVariableMetadata() {
+        async getEnabledProfile() {
+          return profile;
+        },
+        async listProfileVariableMetadata() {
           return [
             {
               key: 'username',
@@ -175,6 +193,7 @@ describe('Playwright automation generation', () => {
         testCaseId: 5,
         sourceTestCaseVersionId: 12,
         environmentId: 8,
+        environmentProfileId: 6,
       },
       2,
     );
@@ -182,6 +201,9 @@ describe('Playwright automation generation', () => {
     expect(writes[0]).toMatchObject({
       sourceTestCaseVersionId: 12,
       environmentId: 8,
+      environmentProfileId: 6,
+      environmentProfileName: 'Authenticated User',
+      environmentProfileRevision: 3,
       versionNumber: 2,
       framework: 'playwright',
       language: 'typescript',
@@ -207,6 +229,7 @@ describe('Playwright automation generation', () => {
             {
               ...automation({ status: 'accepted' }),
               environment,
+              environmentProfile: profile,
               sourceTestCaseVersion: sourceVersion,
             },
           ];
@@ -215,7 +238,7 @@ describe('Playwright automation generation', () => {
       { async require() {} } as never,
       {} as never,
       {
-        async listVariableMetadata() {
+        async listProfileVariableMetadata() {
           return [
             { key: 'username', description: null, isSecret: false },
             { key: 'password', description: null, isSecret: true },
@@ -225,6 +248,33 @@ describe('Playwright automation generation', () => {
     );
 
     const [result] = await service.list(5, 2);
+    expect(result?.stale).toBe(true);
+  });
+
+  test('marks automation stale when its profile revision changes', async () => {
+    const service = createTestAutomationService(
+      {
+        async findTestCase() {
+          return testCase;
+        },
+        async list() {
+          return [
+            {
+              ...automation({ status: 'accepted' }),
+              environment,
+              environmentProfile: { ...profile, revision: 4 },
+              sourceTestCaseVersion: sourceVersion,
+            },
+          ];
+        },
+      } as never,
+      { async require() {} } as never,
+      {} as never,
+      {} as never,
+    );
+
+    const [result] = await service.list(5, 2);
+    expect(result?.profileStale).toBe(true);
     expect(result?.stale).toBe(true);
   });
 
@@ -286,7 +336,10 @@ describe('Playwright automation generation', () => {
         async get() {
           return environment;
         },
-        async listVariableMetadata() {
+        async getEnabledProfile() {
+          return profile;
+        },
+        async listProfileVariableMetadata() {
           return [{ key: 'username', description: null, isSecret: false }];
         },
       } as never,
@@ -298,6 +351,7 @@ describe('Playwright automation generation', () => {
           testCaseId: 5,
           sourceTestCaseVersionId: 12,
           environmentId: 8,
+          environmentProfileId: 6,
         },
         2,
       ),
@@ -314,6 +368,7 @@ describe('Playwright automation generation', () => {
             ...automation(),
             testCase,
             environment,
+            environmentProfile: profile,
             sourceTestCaseVersion: sourceVersion,
           };
         },
@@ -324,7 +379,10 @@ describe('Playwright automation generation', () => {
       { async require() {} } as never,
       {} as never,
       {
-        async listVariableMetadata() {
+        async getEnabledProfile() {
+          return profile;
+        },
+        async listProfileVariableMetadata() {
           return [
             { key: 'username', description: null, isSecret: false },
             { key: 'password', description: null, isSecret: true },

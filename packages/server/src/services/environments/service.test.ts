@@ -7,12 +7,14 @@ function fixture(
   options: {
     denyAuthorization?: boolean;
     uniqueViolationOn?: 'create' | 'update';
+    foreignKeyViolationOnProfileCreate?: boolean;
   } = {},
 ) {
   let nextId = 1;
   const records: Array<Record<string, any>> = [];
   const cookies: Array<Record<string, any>> = [];
   const headers: Array<Record<string, any>> = [];
+  const profiles: Array<Record<string, any>> = [];
   const environment = {
     id: 7,
     projectId: 2,
@@ -29,7 +31,37 @@ function fixture(
       Object.assign(environment, values);
       return environment;
     },
+    async create(values: Record<string, any>) {
+      Object.assign(environment, values);
+      return environment;
+    },
     async clearDefault() {},
+    async bumpProfilesForBinding(
+      kind: 'variable' | 'cookie' | 'header',
+      bindingId: number,
+    ) {
+      const field =
+        kind === 'variable'
+          ? 'variables'
+          : kind === 'cookie'
+            ? 'cookies'
+            : 'headers';
+      const idField =
+        kind === 'variable'
+          ? 'variableId'
+          : kind === 'cookie'
+            ? 'cookieId'
+            : 'headerId';
+      for (const profile of profiles) {
+        if (
+          profile[field].some(
+            (binding: Record<string, number>) => binding[idField] === bindingId,
+          )
+        ) {
+          profile.revision += 1;
+        }
+      }
+    },
     withTransaction<T>(operation: (repository: any) => Promise<T>) {
       return operation(methods);
     },
@@ -158,9 +190,80 @@ function fixture(
       if (index === -1) return undefined;
       return records.splice(index, 1)[0];
     },
+    async listProfiles(environmentId: number) {
+      return profiles.filter(
+        (profile) => profile.environmentId === environmentId,
+      );
+    },
+    async findProfile(id: number) {
+      return profiles.find((profile) => profile.id === id);
+    },
+    async createProfile(
+      values: Record<string, any>,
+      bindings: {
+        variableIds: number[];
+        cookieIds: number[];
+        headerIds: number[];
+      },
+    ) {
+      if (options.foreignKeyViolationOnProfileCreate) {
+        throw { cause: { code: '23503' } };
+      }
+      const now = new Date();
+      const profile = {
+        id: nextId++,
+        revision: 1,
+        createdAt: now,
+        updatedAt: now,
+        ...values,
+        variables: bindings.variableIds.map((variableId) => ({ variableId })),
+        cookies: bindings.cookieIds.map((cookieId) => ({ cookieId })),
+        headers: bindings.headerIds.map((headerId) => ({ headerId })),
+      };
+      profiles.push(profile);
+      return profile;
+    },
+    async updateProfile(
+      id: number,
+      values: Record<string, any>,
+      bindings?: {
+        variableIds: number[];
+        cookieIds: number[];
+        headerIds: number[];
+      },
+    ) {
+      const profile = profiles.find((candidate) => candidate.id === id);
+      if (!profile) return undefined;
+      Object.assign(profile, values, {
+        revision:
+          bindings !== undefined || values.name !== undefined
+            ? profile.revision + 1
+            : profile.revision,
+        updatedAt: new Date(),
+      });
+      if (bindings) {
+        profile.variables = bindings.variableIds.map((variableId) => ({
+          variableId,
+        }));
+        profile.cookies = bindings.cookieIds.map((cookieId) => ({ cookieId }));
+        profile.headers = bindings.headerIds.map((headerId) => ({ headerId }));
+      }
+      return profile;
+    },
+    async deleteProfile(id: number) {
+      const index = profiles.findIndex((profile) => profile.id === id);
+      if (index === -1) return undefined;
+      return profiles.splice(index, 1)[0];
+    },
   };
   const authorization = {
     async require() {
+      if (options.denyAuthorization) {
+        throw new AppError('NOT_FOUND', 'Resource not found');
+      }
+      return { projectId: environment.projectId, role: 'qa' as const };
+    },
+    async requireProject() {
       if (options.denyAuthorization) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
@@ -172,7 +275,7 @@ function fixture(
     authorization as never,
     createEnvironmentVariableCipher(Buffer.alloc(32, 12).toString('base64')),
   );
-  return { service, records, cookies, headers };
+  return { service, records, cookies, headers, profiles };
 }
 
 describe('environment variable service', () => {
@@ -554,5 +657,215 @@ describe('environment header service', () => {
     await expect(
       updateRace.service.updateHeader({ id: created!.id, enabled: false }, 3),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+});
+
+describe('environment profile service', () => {
+  test('creates a binding-free Anonymous profile with every environment', async () => {
+    const { service, profiles } = fixture();
+    await service.create(
+      {
+        projectId: 2,
+        name: 'Staging',
+        type: 'staging',
+        baseUrl: 'https://staging.example.test',
+        isDefault: false,
+      },
+      3,
+    );
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      name: 'Anonymous',
+      isAnonymous: true,
+      variables: [],
+      cookies: [],
+      headers: [],
+    });
+  });
+
+  test('stores only binding references and bumps revision when a binding changes', async () => {
+    const { service, profiles } = fixture();
+    const variable = await service.createVariable(
+      {
+        environmentId: 7,
+        key: 'username',
+        value: 'qa-user',
+        isSecret: false,
+      },
+      3,
+    );
+    const profile = await service.createProfile(
+      {
+        environmentId: 7,
+        name: 'Authenticated User',
+        enabled: true,
+        variableIds: [variable.id],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+
+    expect(profile).toMatchObject({
+      name: 'Authenticated User',
+      revision: 1,
+      variableIds: [variable.id],
+    });
+    expect(JSON.stringify(profiles)).not.toContain('qa-user');
+
+    await service.updateVariable({ id: variable.id, value: 'new-user' }, 3);
+    const updated = await service.getEnabledProfile(profile.id, 7, 3);
+    expect(updated.revision).toBe(2);
+  });
+
+  test('does not bump a profile revision for an enabled-only or no-op update', async () => {
+    const { service } = fixture();
+    const profile = await service.createProfile(
+      {
+        environmentId: 7,
+        name: 'Authenticated User',
+        enabled: true,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+
+    const disabled = await service.updateProfile(
+      { id: profile.id, enabled: false },
+      3,
+    );
+    expect(disabled.revision).toBe(1);
+    const unchanged = await service.updateProfile(
+      {
+        id: profile.id,
+        name: profile.name,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+    expect(unchanged.revision).toBe(1);
+  });
+
+  test('maps a binding deletion race to a profile conflict', async () => {
+    const { service } = fixture({ foreignKeyViolationOnProfileCreate: true });
+    await expect(
+      service.createProfile(
+        {
+          environmentId: 7,
+          name: 'Authenticated User',
+          enabled: true,
+          variableIds: [],
+          cookieIds: [],
+          headerIds: [],
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  test('requires variables referenced by selected cookie and header bindings', async () => {
+    const { service } = fixture();
+    const variable = await service.createVariable(
+      {
+        environmentId: 7,
+        key: 'session_id',
+        value: 'secret-session',
+        isSecret: true,
+      },
+      3,
+    );
+    const cookie = await service.createCookie(
+      {
+        environmentId: 7,
+        name: 'session_id',
+        valueTemplate: '{{session_id}}',
+        domain: null,
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+        expiresAt: null,
+        enabled: true,
+      },
+      3,
+    );
+
+    await expect(
+      service.createProfile(
+        {
+          environmentId: 7,
+          name: 'Broken authentication',
+          enabled: true,
+          variableIds: [],
+          cookieIds: [cookie!.id],
+          headerIds: [],
+        },
+        3,
+      ),
+    ).rejects.toThrow('require selected variables: session_id');
+
+    await expect(
+      service.createProfile(
+        {
+          environmentId: 7,
+          name: 'Authenticated User',
+          enabled: true,
+          variableIds: [variable.id],
+          cookieIds: [cookie!.id],
+          headerIds: [],
+        },
+        3,
+      ),
+    ).resolves.toMatchObject({ cookieIds: [cookie!.id] });
+  });
+
+  test('keeps Anonymous browser-auth-free and fails closed when disabled', async () => {
+    const { service, profiles } = fixture();
+    const loginVariable = await service.createVariable(
+      {
+        environmentId: 7,
+        key: 'login_username',
+        value: 'qa-user',
+        isSecret: false,
+      },
+      3,
+    );
+    await service.create(
+      {
+        projectId: 2,
+        name: 'Staging',
+        type: 'staging',
+        baseUrl: 'https://staging.example.test',
+        isDefault: false,
+      },
+      3,
+    );
+    const anonymous = profiles[0]!;
+
+    await service.updateProfile(
+      {
+        id: anonymous.id,
+        enabled: false,
+        variableIds: [loginVariable.id],
+      },
+      3,
+    );
+    await expect(
+      service.getEnabledProfile(anonymous.id, 7, 3),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(service.deleteProfile(anonymous.id, 3)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
+  test('inherits authorization from the parent environment', async () => {
+    const { service } = fixture({ denyAuthorization: true });
+    await expect(service.listProfiles(7, 9)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
   });
 });

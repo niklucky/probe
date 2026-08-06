@@ -99,6 +99,13 @@
       "when": 1785961027330,
       "tag": "0013_purple_human_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785969418667,
+      "tag": "0014_far_boomer",
+      "breakpoints": true
     }
   ]
 }

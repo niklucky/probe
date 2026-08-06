@@ -8,12 +8,17 @@ import type {
   CreateEnvironmentCookieInput,
   CreateEnvironmentHeaderInput,
   CreateEnvironmentVariableInput,
+  CreateEnvironmentProfileInput,
   UpdateEnvironmentInput,
   UpdateEnvironmentCookieInput,
   UpdateEnvironmentHeaderInput,
   UpdateEnvironmentVariableInput,
+  UpdateEnvironmentProfileInput,
 } from '@probe/shared/schemas/environments';
-import { validateEnvironmentCookieDomain } from '@probe/shared/schemas/environments';
+import {
+  extractEnvironmentVariableReferences,
+  validateEnvironmentCookieDomain,
+} from '@probe/shared/schemas/environments';
 import type { EnvironmentRepository } from '../../repositories/environments/repository';
 import type { AuthorizationService } from '../authorization/service';
 import type { EnvironmentVariableCipher } from './encryption';
@@ -134,6 +139,134 @@ export function createEnvironmentService(
     }
   }
 
+  function publicProfile<
+    T extends {
+      variables?: Array<{ variableId: number }>;
+      cookies?: Array<{ cookieId: number }>;
+      headers?: Array<{ headerId: number }>;
+    },
+  >(profile: T) {
+    const { variables = [], cookies = [], headers = [], ...safe } = profile;
+    return {
+      ...safe,
+      variableIds: variables
+        .map(({ variableId }) => variableId)
+        .sort((left, right) => left - right),
+      cookieIds: cookies
+        .map(({ cookieId }) => cookieId)
+        .sort((left, right) => left - right),
+      headerIds: headers
+        .map(({ headerId }) => headerId)
+        .sort((left, right) => left - right),
+    };
+  }
+
+  function uniqueIds(ids: number[]) {
+    return [...new Set(ids)].sort((left, right) => left - right);
+  }
+
+  function sameIds(left: number[], right: number[]) {
+    const normalizedLeft = uniqueIds(left);
+    const normalizedRight = uniqueIds(right);
+    return (
+      normalizedLeft.length === normalizedRight.length &&
+      normalizedLeft.every((id, index) => id === normalizedRight[index])
+    );
+  }
+
+  async function validateProfileBindings(
+    environmentId: number,
+    bindings: {
+      variableIds: number[];
+      cookieIds: number[];
+      headerIds: number[];
+    },
+  ) {
+    const normalized = {
+      variableIds: uniqueIds(bindings.variableIds),
+      cookieIds: uniqueIds(bindings.cookieIds),
+      headerIds: uniqueIds(bindings.headerIds),
+    };
+    const [variables, cookies, headers] = await Promise.all([
+      repository.listVariables(environmentId),
+      repository.listCookies(environmentId),
+      repository.listHeaders(environmentId),
+    ]);
+    const containsAll = (
+      selected: number[],
+      available: Array<{ id: number }>,
+    ) => {
+      const ids = new Set(available.map(({ id }) => id));
+      return selected.every((id) => ids.has(id));
+    };
+    if (
+      !containsAll(normalized.variableIds, variables) ||
+      !containsAll(normalized.cookieIds, cookies) ||
+      !containsAll(normalized.headerIds, headers)
+    ) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Profile bindings must belong to the same environment',
+      );
+    }
+    const selectedVariableIds = new Set(normalized.variableIds);
+    const selectedVariableKeys = new Set(
+      variables
+        .filter(({ id }) => selectedVariableIds.has(id))
+        .map(({ key }) => key),
+    );
+    const selectedCookieIds = new Set(normalized.cookieIds);
+    const selectedHeaderIds = new Set(normalized.headerIds);
+    const requiredKeys = new Set([
+      ...cookies
+        .filter(({ id }) => selectedCookieIds.has(id))
+        .flatMap(({ valueTemplate }) =>
+          extractEnvironmentVariableReferences(valueTemplate),
+        ),
+      ...headers
+        .filter(({ id }) => selectedHeaderIds.has(id))
+        .flatMap(({ valueTemplate }) =>
+          extractEnvironmentVariableReferences(valueTemplate),
+        ),
+    ]);
+    const missingKeys = [...requiredKeys]
+      .filter((key) => !selectedVariableKeys.has(key))
+      .sort();
+    if (missingKeys.length) {
+      throw new AppError(
+        'BAD_REQUEST',
+        `Profile cookie/header bindings require selected variables: ${missingKeys.join(', ')}`,
+      );
+    }
+    return normalized;
+  }
+
+  function isForeignKeyViolation(error: unknown) {
+    let current = error;
+    for (let depth = 0; depth < 4; depth += 1) {
+      if (!current || typeof current !== 'object') return false;
+      if ('code' in current && current.code === '23503') return true;
+      current = 'cause' in current ? current.cause : undefined;
+    }
+    return false;
+  }
+
+  async function mapProfileConflict<T>(operation: () => Promise<T>) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictError('Environment profile already exists');
+      }
+      if (isForeignKeyViolation(error)) {
+        throw new ConflictError(
+          'A selected profile variable, cookie, or header no longer exists',
+        );
+      }
+      throw error;
+    }
+  }
+
   return {
     async get(id: number, userId: number) {
       await authorization.require(userId, { type: 'environment', id }, 'read');
@@ -163,12 +296,231 @@ export function createEnvironmentService(
             input.productId,
           );
         }
-        return transactionRepository.create({
+        const environment = await transactionRepository.create({
           ...input,
           productId: input.productId ?? null,
           createdById: userId,
         });
+        await transactionRepository.createProfile(
+          {
+            environmentId: environment!.id,
+            name: 'Anonymous',
+            isAnonymous: true,
+            enabled: true,
+            createdById: userId,
+          },
+          { variableIds: [], cookieIds: [], headerIds: [] },
+        );
+        return environment;
       });
+    },
+
+    async listProfiles(environmentId: number, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: environmentId },
+        'read',
+      );
+      return (await repository.listProfiles(environmentId)).map(publicProfile);
+    },
+
+    async getProfile(id: number, userId: number) {
+      const profile = await repository.findProfile(id);
+      if (!profile) throw new AppError('NOT_FOUND', 'Profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: profile.environmentId },
+        'read',
+      );
+      return publicProfile(profile);
+    },
+
+    async getEnabledProfile(id: number, environmentId: number, userId: number) {
+      const profile = await repository.findProfile(id);
+      if (!profile || profile.environmentId !== environmentId) {
+        throw new AppError('NOT_FOUND', 'Profile not found');
+      }
+      await authorization.require(
+        userId,
+        { type: 'environment', id: environmentId },
+        'read',
+      );
+      if (!profile.enabled) {
+        throw new ConflictError('Environment profile is disabled');
+      }
+      return publicProfile(profile);
+    },
+
+    async listProfileVariableMetadata(profileId: number, userId: number) {
+      const profile = await repository.findProfile(profileId);
+      if (!profile) throw new AppError('NOT_FOUND', 'Profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: profile.environmentId },
+        'read',
+      );
+      if (!profile.enabled) {
+        throw new ConflictError('Environment profile is disabled');
+      }
+      const selected = new Set(
+        profile.variables.map(({ variableId }) => variableId),
+      );
+      return (await repository.listVariables(profile.environmentId))
+        .filter(({ id }) => selected.has(id))
+        .map(({ key, description, isSecret }) => ({
+          key,
+          description,
+          isSecret,
+        }));
+    },
+
+    async createProfile(input: CreateEnvironmentProfileInput, userId: number) {
+      await authorization.require(
+        userId,
+        { type: 'environment', id: input.environmentId },
+        'author',
+      );
+      if (!(await repository.find(input.environmentId))) {
+        throw new AppError('NOT_FOUND', 'Environment not found');
+      }
+      const bindings = await validateProfileBindings(input.environmentId, {
+        variableIds: input.variableIds,
+        cookieIds: input.cookieIds,
+        headerIds: input.headerIds,
+      });
+      return mapProfileConflict(() =>
+        repository.withTransaction(async (transactionRepository) => {
+          const profile = await transactionRepository.createProfile(
+            {
+              environmentId: input.environmentId,
+              name: input.name,
+              isAnonymous: false,
+              enabled: input.enabled,
+              createdById: userId,
+            },
+            bindings,
+          );
+          return publicProfile({
+            ...profile,
+            variables: bindings.variableIds.map((variableId) => ({
+              variableId,
+            })),
+            cookies: bindings.cookieIds.map((cookieId) => ({ cookieId })),
+            headers: bindings.headerIds.map((headerId) => ({ headerId })),
+          });
+        }),
+      );
+    },
+
+    async updateProfile(input: UpdateEnvironmentProfileInput, userId: number) {
+      const current = await repository.findProfile(input.id);
+      if (!current) throw new AppError('NOT_FOUND', 'Profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: current.environmentId },
+        'author',
+      );
+      if (
+        current.isAnonymous &&
+        (input.name !== undefined ||
+          input.cookieIds !== undefined ||
+          input.headerIds !== undefined)
+      ) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'The Anonymous profile cannot be renamed or given cookies or headers',
+        );
+      }
+      const hasBindingUpdate =
+        input.variableIds !== undefined ||
+        input.cookieIds !== undefined ||
+        input.headerIds !== undefined;
+      const validatedBindings = hasBindingUpdate
+        ? await validateProfileBindings(current.environmentId, {
+            variableIds:
+              input.variableIds ??
+              current.variables.map(({ variableId }) => variableId),
+            cookieIds:
+              input.cookieIds ??
+              current.cookies.map(({ cookieId }) => cookieId),
+            headerIds:
+              input.headerIds ??
+              current.headers.map(({ headerId }) => headerId),
+          })
+        : undefined;
+      const bindings =
+        validatedBindings &&
+        (!sameIds(
+          validatedBindings.variableIds,
+          current.variables.map(({ variableId }) => variableId),
+        ) ||
+          !sameIds(
+            validatedBindings.cookieIds,
+            current.cookies.map(({ cookieId }) => cookieId),
+          ) ||
+          !sameIds(
+            validatedBindings.headerIds,
+            current.headers.map(({ headerId }) => headerId),
+          ))
+          ? validatedBindings
+          : undefined;
+      const { id, name, variableIds, cookieIds, headerIds, ...otherUpdates } =
+        input;
+      const updates = {
+        ...otherUpdates,
+        ...(name !== undefined && name !== current.name ? { name } : {}),
+      };
+      return mapProfileConflict(() =>
+        repository.withTransaction(async (transactionRepository) => {
+          const profile = await transactionRepository.updateProfile(
+            id,
+            updates,
+            bindings,
+          );
+          if (!profile) throw new AppError('NOT_FOUND', 'Profile not found');
+          return publicProfile({
+            ...profile,
+            variables: (
+              validatedBindings?.variableIds ??
+              current.variables.map(({ variableId }) => variableId)
+            ).map((variableId) => ({ variableId })),
+            cookies: (
+              validatedBindings?.cookieIds ??
+              current.cookies.map(({ cookieId }) => cookieId)
+            ).map((cookieId) => ({ cookieId })),
+            headers: (
+              validatedBindings?.headerIds ??
+              current.headers.map(({ headerId }) => headerId)
+            ).map((headerId) => ({ headerId })),
+          });
+        }),
+      );
+    },
+
+    async deleteProfile(id: number, userId: number) {
+      const profile = await repository.findProfile(id);
+      if (!profile) throw new AppError('NOT_FOUND', 'Profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: profile.environmentId },
+        'author',
+      );
+      if (profile.isAnonymous) {
+        throw new ConflictError('The Anonymous profile cannot be deleted');
+      }
+      try {
+        if (!(await repository.deleteProfile(id))) {
+          throw new AppError('NOT_FOUND', 'Profile not found');
+        }
+      } catch (error) {
+        if (isUniqueViolation(error) || isForeignKeyViolation(error)) {
+          throw new ConflictError(
+            'Profile is referenced by automation history; disable it instead',
+          );
+        }
+        throw error;
+      }
+      return { success: true as const };
     },
 
     async update(input: UpdateEnvironmentInput, userId: number) {
@@ -303,7 +655,10 @@ export function createEnvironmentService(
       }
       const { id, ...updates } = input;
       const cookie = await mapCookieConflict(() =>
-        repository.updateCookie(id, updates),
+        repository.withTransaction(async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding('cookie', id);
+          return transactionRepository.updateCookie(id, updates);
+        }),
       );
       if (!cookie) throw new AppError('NOT_FOUND', 'Resource not found');
       return cookie;
@@ -317,7 +672,13 @@ export function createEnvironmentService(
         { type: 'environment', id: cookie.environmentId },
         'author',
       );
-      if (!(await repository.deleteCookie(id))) {
+      const deleted = await repository.withTransaction(
+        async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding('cookie', id);
+          return transactionRepository.deleteCookie(id);
+        },
+      );
+      if (!deleted) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return { success: true as const };
@@ -361,7 +722,10 @@ export function createEnvironmentService(
       );
       const { id, ...updates } = input;
       const header = await mapHeaderConflict(() =>
-        repository.updateHeader(id, updates),
+        repository.withTransaction(async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding('header', id);
+          return transactionRepository.updateHeader(id, updates);
+        }),
       );
       if (!header) throw new AppError('NOT_FOUND', 'Resource not found');
       return header;
@@ -375,7 +739,13 @@ export function createEnvironmentService(
         { type: 'environment', id: header.environmentId },
         'author',
       );
-      if (!(await repository.deleteHeader(id))) {
+      const deleted = await repository.withTransaction(
+        async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding('header', id);
+          return transactionRepository.deleteHeader(id);
+        },
+      );
+      if (!deleted) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return { success: true as const };
@@ -474,13 +844,21 @@ export function createEnvironmentService(
         );
       }
       const variable = await mapVariableKeyConflict(nextKey, () =>
-        repository.updateVariable(input.id, {
-          ...(input.key !== undefined ? { key: input.key } : {}),
-          ...(encryptedValue !== undefined ? { encryptedValue } : {}),
-          ...(input.isSecret !== undefined ? { isSecret: input.isSecret } : {}),
-          ...(input.description !== undefined
-            ? { description: input.description || null }
-            : {}),
+        repository.withTransaction(async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding(
+            'variable',
+            input.id,
+          );
+          return transactionRepository.updateVariable(input.id, {
+            ...(input.key !== undefined ? { key: input.key } : {}),
+            ...(encryptedValue !== undefined ? { encryptedValue } : {}),
+            ...(input.isSecret !== undefined
+              ? { isSecret: input.isSecret }
+              : {}),
+            ...(input.description !== undefined
+              ? { description: input.description || null }
+              : {}),
+          });
         }),
       );
       if (!variable) {
@@ -499,7 +877,13 @@ export function createEnvironmentService(
         { type: 'environment', id: variable.environmentId },
         'author',
       );
-      if (!(await repository.deleteVariable(id))) {
+      const deleted = await repository.withTransaction(
+        async (transactionRepository) => {
+          await transactionRepository.bumpProfilesForBinding('variable', id);
+          return transactionRepository.deleteVariable(id);
+        },
+      );
+      if (!deleted) {
         throw new AppError('NOT_FOUND', 'Resource not found');
       }
       return { success: true as const };

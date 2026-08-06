@@ -151,6 +151,10 @@ Keep `ENVIRONMENT_VARIABLES_MASTER_KEY` stable after environment variables are
 created. Use a separately generated 32-byte key in every non-local deployment;
 losing or changing it makes stored variable values unreadable.
 
+Named browser authentication states are configured with environment profiles.
+Profiles are explicit, non-inheriting binding sets with fail-closed revision
+checks; see [Environment profiles](docs/environment-profiles.md).
+
 ### Legacy-compatible local defaults
 
 Probe intentionally keeps the existing `signal` database user, database name,

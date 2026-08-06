@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { isRunnableExecutionSnapshot, staleRecoveryValues } from './repository';
+import {
+  isCurrentEnvironmentProfileSnapshot,
+  isRunnableExecutionSnapshot,
+  staleRecoveryValues,
+} from './repository';
 
 describe('abandoned execution recovery', () => {
   test('requeues a stale job when a retry remains', () => {
@@ -36,6 +40,9 @@ describe('abandoned execution recovery', () => {
 describe('execution snapshot validation', () => {
   const payload = {
     environmentId: 9,
+    environmentProfileId: 4,
+    environmentProfileRevision: 2,
+    environmentProfile: { environmentId: 9, revision: 2, enabled: true },
     automation: { id: 7, environmentId: 9, status: 'generated' },
   };
 
@@ -72,5 +79,42 @@ describe('execution snapshot validation', () => {
         },
       }),
     ).toBe(false);
+  });
+
+  test('rejects missing, disabled, or stale profiles without fallback', () => {
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfile: null,
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(false);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfile: { ...payload.environmentProfile, enabled: false },
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(false);
+    expect(
+      isRunnableExecutionSnapshot({
+        ...payload,
+        environmentProfileRevision: 1,
+        automation: { ...payload.automation, status: 'accepted' },
+      }),
+    ).toBe(false);
+  });
+
+  test('detects profile drift after bindings have loaded', () => {
+    expect(
+      isCurrentEnvironmentProfileSnapshot(payload, payload.environmentProfile),
+    ).toBe(true);
+    expect(
+      isCurrentEnvironmentProfileSnapshot(payload, {
+        ...payload.environmentProfile,
+        revision: 3,
+      }),
+    ).toBe(false);
+    expect(isCurrentEnvironmentProfileSnapshot(payload, undefined)).toBe(false);
   });
 });

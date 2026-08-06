@@ -108,14 +108,22 @@ function publicAutomation<
     sourceTestCaseVersionId: number;
     testCase?: { currentVersionId: number | null };
     environment?: { name: string };
+    environmentProfile?: { revision: number; enabled: boolean } | null;
+    environmentProfileRevision?: number | null;
     sourceTestCaseVersion?: { versionNumber: number };
   },
 >(automation: T) {
+  const profileStale =
+    !automation.environmentProfile ||
+    !automation.environmentProfile.enabled ||
+    automation.environmentProfile.revision !==
+      automation.environmentProfileRevision;
   return {
     ...automation,
     stale:
       automation.testCase?.currentVersionId !==
-      automation.sourceTestCaseVersionId,
+        automation.sourceTestCaseVersionId || profileStale,
+    profileStale,
     environmentName: automation.environment?.name ?? '',
     sourceVersionNumber: automation.sourceTestCaseVersion?.versionNumber ?? 0,
   };
@@ -159,6 +167,11 @@ export function createTestAutomationService(
       ) {
         throw new NotFoundError('Environment not found');
       }
+      const profile = await environments.getEnabledProfile(
+        input.environmentProfileId,
+        environment.id,
+        userId,
+      );
 
       const specification = {
         title: sourceVersion.title,
@@ -170,8 +183,8 @@ export function createTestAutomationService(
       };
       const requiredVariables =
         extractEnvironmentVariableReferencesFromValue(specification);
-      const variableMetadata = await environments.listVariableMetadata(
-        environment.id,
+      const variableMetadata = await environments.listProfileVariableMetadata(
+        profile.id,
         userId,
       );
       const availableVariables = new Set(
@@ -204,6 +217,7 @@ export function createTestAutomationService(
           prompt: automationPrompt(
             specification,
             environment,
+            profile,
             referencedMetadata,
           ),
           schema: automationSourceJsonSchema,
@@ -231,6 +245,9 @@ export function createTestAutomationService(
               testCaseId: testCase.id,
               sourceTestCaseVersionId: sourceVersion.id,
               environmentId: environment.id,
+              environmentProfileId: profile.id,
+              environmentProfileName: profile.name,
+              environmentProfileRevision: profile.revision,
               versionNumber,
               framework: 'playwright',
               language: 'typescript',
@@ -252,6 +269,7 @@ export function createTestAutomationService(
           ...automation,
           testCase,
           environment,
+          environmentProfile: profile,
           sourceTestCaseVersion: sourceVersion,
         });
       } catch (error) {
@@ -293,8 +311,23 @@ export function createTestAutomationService(
       if (automation.status !== 'generated') {
         throw new ConflictError('Automation proposal is no longer available');
       }
-      const variableMetadata = await environments.listVariableMetadata(
+      if (!automation.environmentProfileId) {
+        throw new ConflictError(
+          'Automation has no environment profile; regenerate it before accepting',
+        );
+      }
+      const profile = await environments.getEnabledProfile(
+        automation.environmentProfileId,
         automation.environmentId,
+        userId,
+      );
+      if (profile.revision !== automation.environmentProfileRevision) {
+        throw new ConflictError(
+          'Environment profile changed; regenerate the automation',
+        );
+      }
+      const variableMetadata = await environments.listProfileVariableMetadata(
+        profile.id,
         userId,
       );
       const requiredVariables = extractEnvironmentVariableReferencesFromValue({
@@ -314,6 +347,7 @@ export function createTestAutomationService(
         ...accepted,
         testCase: automation.testCase,
         environment: automation.environment,
+        environmentProfile: profile,
         sourceTestCaseVersion: automation.sourceTestCaseVersion,
       });
     },

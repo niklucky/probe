@@ -8,6 +8,7 @@ import {
   Edit,
   KeyRound,
   Plus,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
@@ -71,6 +72,14 @@ const emptyHeaderForm = (origin = '') => ({
   enabled: true,
 });
 
+const emptyProfileForm = {
+  name: '',
+  enabled: true,
+  variableIds: [] as number[],
+  cookieIds: [] as number[],
+  headerIds: [] as number[],
+};
+
 function formatDateTimeLocal(value: string | Date) {
   const date = new Date(value);
   const pad = (part: number) => String(part).padStart(2, '0');
@@ -112,6 +121,15 @@ export function EnvironmentsPage() {
   const [editingHeaderId, setEditingHeaderId] = useState<number | null>(null);
   const [headerForm, setHeaderForm] = useState(emptyHeaderForm());
   const [headerError, setHeaderError] = useState('');
+  const [profilesEnvironment, setProfilesEnvironment] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
+  const [editingProfileIsAnonymous, setEditingProfileIsAnonymous] =
+    useState(false);
+  const [profileForm, setProfileForm] = useState(emptyProfileForm);
+  const [profileError, setProfileError] = useState('');
   const input = { projectId: id, productId };
 
   const { data: project } = trpc.projects.get.useQuery({ id });
@@ -133,6 +151,24 @@ export function EnvironmentsPage() {
   const { data: headers = [] } = trpc.environments.listHeaders.useQuery(
     headersInput,
     { enabled: Boolean(headersEnvironment) },
+  );
+  const profileEnvironmentId = profilesEnvironment?.id ?? 0;
+  const profileInput = { environmentId: profileEnvironmentId };
+  const { data: profiles = [] } = trpc.environments.listProfiles.useQuery(
+    profileInput,
+    { enabled: Boolean(profilesEnvironment) },
+  );
+  const { data: profileVariables = [] } =
+    trpc.environments.listVariables.useQuery(profileInput, {
+      enabled: Boolean(profilesEnvironment),
+    });
+  const { data: profileCookies = [] } = trpc.environments.listCookies.useQuery(
+    profileInput,
+    { enabled: Boolean(profilesEnvironment) },
+  );
+  const { data: profileHeaders = [] } = trpc.environments.listHeaders.useQuery(
+    profileInput,
+    { enabled: Boolean(profilesEnvironment) },
   );
   const utils = trpc.useContext();
 
@@ -228,6 +264,32 @@ export function EnvironmentsPage() {
     onSuccess: refreshHeaders,
     onError: (error) => setHeaderError(error.message),
   });
+  const refreshProfiles = () =>
+    utils.environments.listProfiles.invalidate(profileInput);
+  const resetProfileEditor = () => {
+    setEditingProfileId(null);
+    setEditingProfileIsAnonymous(false);
+    setProfileForm(emptyProfileForm);
+    setProfileError('');
+  };
+  const createProfile = trpc.environments.createProfile.useMutation({
+    onSuccess: () => {
+      refreshProfiles();
+      resetProfileEditor();
+    },
+    onError: (error) => setProfileError(error.message),
+  });
+  const updateProfile = trpc.environments.updateProfile.useMutation({
+    onSuccess: () => {
+      refreshProfiles();
+      resetProfileEditor();
+    },
+    onError: (error) => setProfileError(error.message),
+  });
+  const deleteProfile = trpc.environments.deleteProfile.useMutation({
+    onSuccess: refreshProfiles,
+    onError: (error) => setProfileError(error.message),
+  });
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -320,6 +382,41 @@ export function EnvironmentsPage() {
         origin: canonicalOrigin,
       });
     }
+  };
+
+  const submitProfile = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!profilesEnvironment) return;
+    if (editingProfileId) {
+      updateProfile.mutate(
+        editingProfileIsAnonymous
+          ? {
+              id: editingProfileId,
+              enabled: profileForm.enabled,
+              variableIds: profileForm.variableIds,
+            }
+          : { id: editingProfileId, ...profileForm },
+      );
+    } else {
+      createProfile.mutate({
+        environmentId: profilesEnvironment.id,
+        ...profileForm,
+      });
+    }
+  };
+
+  const toggleProfileBinding = (
+    field: 'variableIds' | 'cookieIds' | 'headerIds',
+    bindingId: number,
+    selected: boolean,
+  ) => {
+    const values = new Set(profileForm[field]);
+    if (selected) values.add(bindingId);
+    else values.delete(bindingId);
+    setProfileForm({
+      ...profileForm,
+      [field]: [...values].sort((left, right) => left - right),
+    });
   };
 
   const formFields = (
@@ -507,7 +604,21 @@ export function EnvironmentsPage() {
                 >
                   {environment.baseUrl}
                 </a>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setProfilesEnvironment({
+                        id: environment.id,
+                        name: environment.name,
+                      });
+                      resetProfileEditor();
+                    }}
+                  >
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                    Profiles
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -576,6 +687,195 @@ export function EnvironmentsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={profilesEnvironment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setProfilesEnvironment(null);
+            resetProfileEditor();
+          }
+        }}
+      >
+        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{profilesEnvironment?.name} profiles</DialogTitle>
+            <DialogDescription>
+              Profiles have no inheritance. Each authentication binding must be
+              selected explicitly. Anonymous may expose variables to test code
+              but never injects cookies or headers.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="grid gap-4" onSubmit={submitProfile}>
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+              <div className="grid gap-2">
+                <Label htmlFor="profile-name">Profile name</Label>
+                <Input
+                  id="profile-name"
+                  value={profileForm.name}
+                  onChange={(event) =>
+                    setProfileForm({ ...profileForm, name: event.target.value })
+                  }
+                  placeholder="Authenticated User"
+                  disabled={editingProfileIsAnonymous}
+                  required
+                />
+              </div>
+              <div className="flex items-end gap-2 pb-2">
+                <Checkbox
+                  id="profile-enabled"
+                  checked={profileForm.enabled}
+                  onCheckedChange={(checked) =>
+                    setProfileForm({
+                      ...profileForm,
+                      enabled: checked === true,
+                    })
+                  }
+                />
+                <Label htmlFor="profile-enabled">Enabled</Label>
+              </div>
+            </div>
+
+            {(
+              [
+                [
+                  'Variables',
+                  'variableIds',
+                  profileVariables,
+                  (item: (typeof profileVariables)[number]) => item.key,
+                ],
+                [
+                  'Cookies',
+                  'cookieIds',
+                  profileCookies,
+                  (item: (typeof profileCookies)[number]) => item.name,
+                ],
+                [
+                  'Headers',
+                  'headerIds',
+                  profileHeaders,
+                  (item: (typeof profileHeaders)[number]) =>
+                    `${item.name} · ${item.origin}`,
+                ],
+              ] as const
+            ).map(([title, field, items, labelFor]) => (
+              <div key={field} className="grid gap-2 rounded-md border p-3">
+                <div className="text-sm font-medium">{title}</div>
+                {items.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {items.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={profileForm[field].includes(item.id)}
+                          disabled={
+                            field !== 'variableIds' && editingProfileIsAnonymous
+                          }
+                          onCheckedChange={(checked) =>
+                            toggleProfileBinding(
+                              field,
+                              item.id,
+                              checked === true,
+                            )
+                          }
+                        />
+                        <span className="truncate">
+                          {labelFor(item as never)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No {title.toLowerCase()} configured.
+                  </p>
+                )}
+              </div>
+            ))}
+
+            <div className="flex justify-end gap-2">
+              {editingProfileId && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={resetProfileEditor}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                type="submit"
+                disabled={createProfile.isPending || updateProfile.isPending}
+              >
+                {editingProfileId ? 'Save profile' : 'Add profile'}
+              </Button>
+            </div>
+          </form>
+
+          {profileError && (
+            <p className="text-sm text-destructive">{profileError}</p>
+          )}
+
+          <div className="max-h-64 space-y-2 overflow-y-auto">
+            {profiles.map((profile) => (
+              <div
+                key={profile.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-3"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{profile.name}</span>
+                    {profile.isAnonymous && <Badge>Anonymous</Badge>}
+                    {!profile.enabled && (
+                      <Badge variant="secondary">Disabled</Badge>
+                    )}
+                    <Badge variant="outline">revision {profile.revision}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {profile.variableIds.length} variables ·{' '}
+                    {profile.cookieIds.length} cookies ·{' '}
+                    {profile.headerIds.length} headers
+                  </p>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEditingProfileId(profile.id);
+                      setEditingProfileIsAnonymous(profile.isAnonymous);
+                      setProfileForm({
+                        name: profile.name,
+                        enabled: profile.enabled,
+                        variableIds: profile.variableIds,
+                        cookieIds: profile.cookieIds,
+                        headerIds: profile.headerIds,
+                      });
+                      setProfileError('');
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  {!profile.isAnonymous && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => deleteProfile.mutate({ id: profile.id })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -994,8 +1294,8 @@ export function EnvironmentsPage() {
             <DialogDescription>
               Values must use environment templates such as{' '}
               <code>{'Bearer {{access_token}}'}</code>. Resolved values are
-              injected only for the exact configured origin and are never
-              stored or returned by the API.
+              injected only for the exact configured origin and are never stored
+              or returned by the API.
             </DialogDescription>
           </DialogHeader>
 

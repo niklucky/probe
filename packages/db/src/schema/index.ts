@@ -298,6 +298,96 @@ export const environmentHeaders = pgTable(
   }),
 );
 
+// Authentication state is opt-in and profile-scoped. Profiles reference
+// encrypted variables and templated browser bindings; they never copy values.
+export const environmentProfiles = pgTable(
+  'environment_profiles',
+  {
+    id: serial('id').primaryKey(),
+    environmentId: integer('environment_id')
+      .references(() => environments.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    isAnonymous: boolean('is_anonymous').notNull().default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    revision: integer('revision').notNull().default(1),
+    createdById: integer('created_by_id')
+      .references(() => users.id)
+      .notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    environmentIndex: index('environment_profiles_environment_index').on(
+      table.environmentId,
+    ),
+    environmentNameUnique: uniqueIndex(
+      'environment_profiles_environment_name_unique',
+    ).on(table.environmentId, sql`lower(${table.name})`),
+    oneAnonymousPerEnvironment: uniqueIndex(
+      'environment_profiles_one_anonymous_unique',
+    )
+      .on(table.environmentId)
+      .where(sql`${table.isAnonymous} = true`),
+  }),
+);
+
+export const environmentProfileVariables = pgTable(
+  'environment_profile_variables',
+  {
+    id: serial('id').primaryKey(),
+    profileId: integer('profile_id')
+      .references(() => environmentProfiles.id, { onDelete: 'cascade' })
+      .notNull(),
+    variableId: integer('variable_id')
+      .references(() => environmentVariables.id, { onDelete: 'cascade' })
+      .notNull(),
+  },
+  (table) => ({
+    profileVariableUnique: uniqueIndex(
+      'environment_profile_variables_unique',
+    ).on(table.profileId, table.variableId),
+  }),
+);
+
+export const environmentProfileCookies = pgTable(
+  'environment_profile_cookies',
+  {
+    id: serial('id').primaryKey(),
+    profileId: integer('profile_id')
+      .references(() => environmentProfiles.id, { onDelete: 'cascade' })
+      .notNull(),
+    cookieId: integer('cookie_id')
+      .references(() => environmentCookies.id, { onDelete: 'cascade' })
+      .notNull(),
+  },
+  (table) => ({
+    profileCookieUnique: uniqueIndex('environment_profile_cookies_unique').on(
+      table.profileId,
+      table.cookieId,
+    ),
+  }),
+);
+
+export const environmentProfileHeaders = pgTable(
+  'environment_profile_headers',
+  {
+    id: serial('id').primaryKey(),
+    profileId: integer('profile_id')
+      .references(() => environmentProfiles.id, { onDelete: 'cascade' })
+      .notNull(),
+    headerId: integer('header_id')
+      .references(() => environmentHeaders.id, { onDelete: 'cascade' })
+      .notNull(),
+  },
+  (table) => ({
+    profileHeaderUnique: uniqueIndex('environment_profile_headers_unique').on(
+      table.profileId,
+      table.headerId,
+    ),
+  }),
+);
+
 // AI credentials and custom headers are stored only in encryptedConfig. Never
 // select this table directly for API responses; the server repository redacts it.
 export const aiConnections = pgTable(
@@ -548,6 +638,14 @@ export const testAutomations = pgTable(
     environmentId: integer('environment_id')
       .references(() => environments.id, { onDelete: 'restrict' })
       .notNull(),
+    environmentProfileId: integer('environment_profile_id').references(
+      () => environmentProfiles.id,
+      { onDelete: 'restrict' },
+    ),
+    environmentProfileName: varchar('environment_profile_name', {
+      length: 255,
+    }),
+    environmentProfileRevision: integer('environment_profile_revision'),
     versionNumber: integer('version_number').notNull(),
     framework: automationFrameworkEnum('framework')
       .notNull()
@@ -607,6 +705,14 @@ export const automationExecutionJobs = pgTable(
     environmentId: integer('environment_id')
       .references(() => environments.id, { onDelete: 'restrict' })
       .notNull(),
+    environmentProfileId: integer('environment_profile_id').references(
+      () => environmentProfiles.id,
+      { onDelete: 'restrict' },
+    ),
+    environmentProfileName: varchar('environment_profile_name', {
+      length: 255,
+    }),
+    environmentProfileRevision: integer('environment_profile_revision'),
     status: automationExecutionStatusEnum('status').notNull().default('queued'),
     requestedById: integer('requested_by_id')
       .references(() => users.id)
@@ -933,6 +1039,68 @@ export const environmentsRelations = relations(
     variables: many(environmentVariables),
     cookies: many(environmentCookies),
     headers: many(environmentHeaders),
+    profiles: many(environmentProfiles),
+  }),
+);
+
+export const environmentProfilesRelations = relations(
+  environmentProfiles,
+  ({ one, many }) => ({
+    environment: one(environments, {
+      fields: [environmentProfiles.environmentId],
+      references: [environments.id],
+    }),
+    createdBy: one(users, {
+      fields: [environmentProfiles.createdById],
+      references: [users.id],
+    }),
+    variables: many(environmentProfileVariables),
+    cookies: many(environmentProfileCookies),
+    headers: many(environmentProfileHeaders),
+    testAutomations: many(testAutomations),
+    automationExecutionJobs: many(automationExecutionJobs),
+  }),
+);
+
+export const environmentProfileVariablesRelations = relations(
+  environmentProfileVariables,
+  ({ one }) => ({
+    profile: one(environmentProfiles, {
+      fields: [environmentProfileVariables.profileId],
+      references: [environmentProfiles.id],
+    }),
+    variable: one(environmentVariables, {
+      fields: [environmentProfileVariables.variableId],
+      references: [environmentVariables.id],
+    }),
+  }),
+);
+
+export const environmentProfileCookiesRelations = relations(
+  environmentProfileCookies,
+  ({ one }) => ({
+    profile: one(environmentProfiles, {
+      fields: [environmentProfileCookies.profileId],
+      references: [environmentProfiles.id],
+    }),
+    cookie: one(environmentCookies, {
+      fields: [environmentProfileCookies.cookieId],
+      references: [environmentCookies.id],
+    }),
+  }),
+);
+
+export const environmentProfileHeadersRelations = relations(
+  environmentProfileHeaders,
+  ({ one }) => ({
+    profile: one(environmentProfiles, {
+      fields: [environmentProfileHeaders.profileId],
+      references: [environmentProfiles.id],
+    }),
+    header: one(environmentHeaders, {
+      fields: [environmentProfileHeaders.headerId],
+      references: [environmentHeaders.id],
+    }),
   }),
 );
 
@@ -1126,6 +1294,10 @@ export const testAutomationsRelations = relations(
       fields: [testAutomations.environmentId],
       references: [environments.id],
     }),
+    environmentProfile: one(environmentProfiles, {
+      fields: [testAutomations.environmentProfileId],
+      references: [environmentProfiles.id],
+    }),
     createdBy: one(users, {
       fields: [testAutomations.createdById],
       references: [users.id],
@@ -1156,6 +1328,10 @@ export const automationExecutionJobsRelations = relations(
     environment: one(environments, {
       fields: [automationExecutionJobs.environmentId],
       references: [environments.id],
+    }),
+    environmentProfile: one(environmentProfiles, {
+      fields: [automationExecutionJobs.environmentProfileId],
+      references: [environmentProfiles.id],
     }),
     requestedBy: one(users, {
       fields: [automationExecutionJobs.requestedById],

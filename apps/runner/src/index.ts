@@ -20,6 +20,7 @@ import {
 } from './environment-variables';
 import {
   createRunnerRepository,
+  isCurrentEnvironmentProfileSnapshot,
   isRunnableExecutionSnapshot,
 } from './repository';
 
@@ -92,12 +93,16 @@ async function runClaimedJob(jobId: number) {
     extractAutomationEnvironmentReferences(payload.automation.source);
   let runtimeEnvironment: Parameters<typeof executeInContainer>[1];
   try {
-    const cookieDefinitions = payload.settings.applyEnvironmentCookies
-      ? await repository.listEnvironmentCookies(payload.environmentId)
-      : [];
-    const headerDefinitions = payload.settings.applyEnvironmentHeaders
-      ? await repository.listEnvironmentHeaders(payload.environmentId)
-      : [];
+    const cookieDefinitions =
+      !payload.environmentProfile!.isAnonymous &&
+      payload.settings.applyEnvironmentCookies
+        ? await repository.listEnvironmentCookies(payload.environmentProfileId!)
+        : [];
+    const headerDefinitions =
+      !payload.environmentProfile!.isAnonymous &&
+      payload.settings.applyEnvironmentHeaders
+        ? await repository.listEnvironmentHeaders(payload.environmentProfileId!)
+        : [];
     const cookieReferences = cookieVariableReferences(cookieDefinitions);
     const headerReferences = headerVariableReferences(headerDefinitions);
     const references = [
@@ -108,9 +113,18 @@ async function runClaimedJob(jobId: number) {
       ]),
     ].sort();
     const variables = await repository.listEnvironmentVariables(
-      payload.environmentId,
+      payload.environmentProfileId!,
       references,
     );
+    const currentProfile = await repository.getEnvironmentProfileSnapshot(
+      payload.environmentProfileId!,
+    );
+    if (!isCurrentEnvironmentProfileSnapshot(payload, currentProfile)) {
+      throw new RuntimeEnvironmentError(
+        'INVALID_EXECUTION_SNAPSHOT',
+        'Environment profile changed while the execution snapshot was loading',
+      );
+    }
     const resolvedEnvironment = resolveRuntimeEnvironment(
       references,
       variables,
