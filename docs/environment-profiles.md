@@ -14,12 +14,14 @@ enter credentials while still starting from an unauthenticated browser.
 
 Automation generation and execution each require an explicit enabled profile.
 Automation and execution records store the selected profile id, name, and
-revision. Editing a selected variable, cookie, header, or the profile itself
-increments that revision. Generated automation is then shown as stale, and a
-queued execution fails safely if its recorded revision no longer matches.
+revision. Editing a selected variable, cookie, header, profile name, or profile
+bindings increments that revision. Generated automation is then shown as stale,
+and a queued execution fails safely if its recorded revision no longer matches.
 Disabling or removing a profile never falls back to another, potentially more
 privileged profile.
 
 Existing environments receive an Anonymous profile during migration. Existing
-automation records remain unprofiled and must be regenerated; existing
-execution history remains readable without inventing an authentication state.
+automation records remain unprofiled and cannot be queued until regenerated.
+An accepted automation can only run with the exact profile id and revision it
+was generated against. Existing execution history remains readable without
+inventing an authentication state.

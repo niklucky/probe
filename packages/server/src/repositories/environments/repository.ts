@@ -148,11 +148,14 @@ function bindEnvironmentRepository(database: Database) {
           );
         }
       }
+      const bumpsRevision = bindings !== undefined || values.name !== undefined;
       const [profile] = await database
         .update(environmentProfiles)
         .set({
           ...values,
-          revision: sql`${environmentProfiles.revision} + 1`,
+          ...(bumpsRevision
+            ? { revision: sql`${environmentProfiles.revision} + 1` }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(environmentProfiles.id, id))

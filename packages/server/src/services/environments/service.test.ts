@@ -7,6 +7,7 @@ function fixture(
   options: {
     denyAuthorization?: boolean;
     uniqueViolationOn?: 'create' | 'update';
+    foreignKeyViolationOnProfileCreate?: boolean;
   } = {},
 ) {
   let nextId = 1;
@@ -205,6 +206,9 @@ function fixture(
         headerIds: number[];
       },
     ) {
+      if (options.foreignKeyViolationOnProfileCreate) {
+        throw { cause: { code: '23503' } };
+      }
       const now = new Date();
       const profile = {
         id: nextId++,
@@ -231,7 +235,10 @@ function fixture(
       const profile = profiles.find((candidate) => candidate.id === id);
       if (!profile) return undefined;
       Object.assign(profile, values, {
-        revision: profile.revision + 1,
+        revision:
+          bindings !== undefined || values.name !== undefined
+            ? profile.revision + 1
+            : profile.revision,
         updatedAt: new Date(),
       });
       if (bindings) {
@@ -691,7 +698,6 @@ describe('environment profile service', () => {
       {
         environmentId: 7,
         name: 'Authenticated User',
-        isAnonymous: false,
         enabled: true,
         variableIds: [variable.id],
         cookieIds: [],
@@ -710,6 +716,55 @@ describe('environment profile service', () => {
     await service.updateVariable({ id: variable.id, value: 'new-user' }, 3);
     const updated = await service.getEnabledProfile(profile.id, 7, 3);
     expect(updated.revision).toBe(2);
+  });
+
+  test('does not bump a profile revision for an enabled-only or no-op update', async () => {
+    const { service } = fixture();
+    const profile = await service.createProfile(
+      {
+        environmentId: 7,
+        name: 'Authenticated User',
+        enabled: true,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+
+    const disabled = await service.updateProfile(
+      { id: profile.id, enabled: false },
+      3,
+    );
+    expect(disabled.revision).toBe(1);
+    const unchanged = await service.updateProfile(
+      {
+        id: profile.id,
+        name: profile.name,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+    expect(unchanged.revision).toBe(1);
+  });
+
+  test('maps a binding deletion race to a profile conflict', async () => {
+    const { service } = fixture({ foreignKeyViolationOnProfileCreate: true });
+    await expect(
+      service.createProfile(
+        {
+          environmentId: 7,
+          name: 'Authenticated User',
+          enabled: true,
+          variableIds: [],
+          cookieIds: [],
+          headerIds: [],
+        },
+        3,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
   test('requires variables referenced by selected cookie and header bindings', async () => {
@@ -744,7 +799,6 @@ describe('environment profile service', () => {
         {
           environmentId: 7,
           name: 'Broken authentication',
-          isAnonymous: false,
           enabled: true,
           variableIds: [],
           cookieIds: [cookie!.id],
@@ -759,7 +813,6 @@ describe('environment profile service', () => {
         {
           environmentId: 7,
           name: 'Authenticated User',
-          isAnonymous: false,
           enabled: true,
           variableIds: [variable.id],
           cookieIds: [cookie!.id],
@@ -771,7 +824,7 @@ describe('environment profile service', () => {
   });
 
   test('keeps Anonymous browser-auth-free and fails closed when disabled', async () => {
-    const { service } = fixture();
+    const { service, profiles } = fixture();
     const loginVariable = await service.createVariable(
       {
         environmentId: 7,
@@ -781,18 +834,17 @@ describe('environment profile service', () => {
       },
       3,
     );
-    const anonymous = await service.createProfile(
+    await service.create(
       {
-        environmentId: 7,
-        name: 'Anonymous',
-        isAnonymous: true,
-        enabled: true,
-        variableIds: [],
-        cookieIds: [],
-        headerIds: [],
+        projectId: 2,
+        name: 'Staging',
+        type: 'staging',
+        baseUrl: 'https://staging.example.test',
+        isDefault: false,
       },
       3,
     );
+    const anonymous = profiles[0]!;
 
     await service.updateProfile(
       {

@@ -165,6 +165,15 @@ export function createEnvironmentService(
     return [...new Set(ids)].sort((left, right) => left - right);
   }
 
+  function sameIds(left: number[], right: number[]) {
+    const normalizedLeft = uniqueIds(left);
+    const normalizedRight = uniqueIds(right);
+    return (
+      normalizedLeft.length === normalizedRight.length &&
+      normalizedLeft.every((id, index) => id === normalizedRight[index])
+    );
+  }
+
   async function validateProfileBindings(
     environmentId: number,
     bindings: {
@@ -248,6 +257,11 @@ export function createEnvironmentService(
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ConflictError('Environment profile already exists');
+      }
+      if (isForeignKeyViolation(error)) {
+        throw new ConflictError(
+          'A selected profile variable, cookie, or header no longer exists',
+        );
       }
       throw error;
     }
@@ -374,22 +388,13 @@ export function createEnvironmentService(
         cookieIds: input.cookieIds,
         headerIds: input.headerIds,
       });
-      if (
-        input.isAnonymous &&
-        (bindings.cookieIds.length || bindings.headerIds.length)
-      ) {
-        throw new AppError(
-          'BAD_REQUEST',
-          'Anonymous profiles cannot include cookies or headers',
-        );
-      }
       return mapProfileConflict(() =>
         repository.withTransaction(async (transactionRepository) => {
           const profile = await transactionRepository.createProfile(
             {
               environmentId: input.environmentId,
               name: input.name,
-              isAnonymous: input.isAnonymous,
+              isAnonymous: false,
               enabled: input.enabled,
               createdById: userId,
             },
@@ -430,7 +435,7 @@ export function createEnvironmentService(
         input.variableIds !== undefined ||
         input.cookieIds !== undefined ||
         input.headerIds !== undefined;
-      const bindings = hasBindingUpdate
+      const validatedBindings = hasBindingUpdate
         ? await validateProfileBindings(current.environmentId, {
             variableIds:
               input.variableIds ??
@@ -443,7 +448,28 @@ export function createEnvironmentService(
               current.headers.map(({ headerId }) => headerId),
           })
         : undefined;
-      const { id, variableIds, cookieIds, headerIds, ...updates } = input;
+      const bindings =
+        validatedBindings &&
+        (!sameIds(
+          validatedBindings.variableIds,
+          current.variables.map(({ variableId }) => variableId),
+        ) ||
+          !sameIds(
+            validatedBindings.cookieIds,
+            current.cookies.map(({ cookieId }) => cookieId),
+          ) ||
+          !sameIds(
+            validatedBindings.headerIds,
+            current.headers.map(({ headerId }) => headerId),
+          ))
+          ? validatedBindings
+          : undefined;
+      const { id, name, variableIds, cookieIds, headerIds, ...otherUpdates } =
+        input;
+      const updates = {
+        ...otherUpdates,
+        ...(name !== undefined && name !== current.name ? { name } : {}),
+      };
       return mapProfileConflict(() =>
         repository.withTransaction(async (transactionRepository) => {
           const profile = await transactionRepository.updateProfile(
@@ -455,15 +481,15 @@ export function createEnvironmentService(
           return publicProfile({
             ...profile,
             variables: (
-              bindings?.variableIds ??
+              validatedBindings?.variableIds ??
               current.variables.map(({ variableId }) => variableId)
             ).map((variableId) => ({ variableId })),
             cookies: (
-              bindings?.cookieIds ??
+              validatedBindings?.cookieIds ??
               current.cookies.map(({ cookieId }) => cookieId)
             ).map((cookieId) => ({ cookieId })),
             headers: (
-              bindings?.headerIds ??
+              validatedBindings?.headerIds ??
               current.headers.map(({ headerId }) => headerId)
             ).map((headerId) => ({ headerId })),
           });

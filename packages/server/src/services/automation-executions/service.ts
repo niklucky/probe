@@ -1,13 +1,16 @@
 import type { Client } from 'minio';
 import { serverEnv } from '../../env';
 import { publicizeStorageUrl } from '../files/public-url';
-import { ConflictError, NotFoundError } from '@probe/shared/errors/app-error';
+import {
+  BadRequestError,
+  ConflictError,
+  NotFoundError,
+} from '@probe/shared/errors/app-error';
 import type { QueueAutomationExecutionInput } from '@probe/shared/schemas/automation-executions';
 import type { AutomationExecutionRepository } from '../../repositories/automation-executions/repository';
 import type { AuthorizationService } from '../authorization/service';
 import type { EnvironmentService } from '../environments/service';
 import { extractAutomationEnvironmentReferences } from '@probe/shared/automation-environment';
-import { BadRequestError } from '@probe/shared/errors/app-error';
 
 function publicJob<T extends object>(job: T) {
   const artifacts = (
@@ -55,11 +58,29 @@ export function createAutomationExecutionService(
       if (automation.status !== 'accepted') {
         throw new ConflictError('Only accepted automation can be executed');
       }
+      if (
+        automation.environmentProfileId === null ||
+        automation.environmentProfileRevision === null
+      ) {
+        throw new ConflictError(
+          'Automation has no environment profile snapshot and must be regenerated',
+        );
+      }
+      if (input.environmentProfileId !== automation.environmentProfileId) {
+        throw new ConflictError(
+          'Automation must be executed with the environment profile it was generated against',
+        );
+      }
       const profile = await environments.getEnabledProfile(
         input.environmentProfileId,
         automation.environmentId,
         userId,
       );
+      if (profile.revision !== automation.environmentProfileRevision) {
+        throw new ConflictError(
+          'Environment profile changed after this automation was generated; regenerate the automation before running it',
+        );
+      }
       const metadata = await environments.listProfileVariableMetadata(
         profile.id,
         userId,

@@ -329,7 +329,12 @@ export const environmentHeaderIdInputSchema = z.object({
   id: z.number().int().positive(),
 });
 
-const profileBindingIdsSchema = z.array(z.number().int().positive()).max(500);
+const profileBindingIdsSchema = z
+  .array(z.number().int().positive())
+  .max(500)
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: 'Profile binding IDs must be unique',
+  });
 
 export const environmentProfileSchema = createSelectSchema(environmentProfiles)
   .pick({
@@ -361,23 +366,9 @@ const profileFields = z.object({
   headerIds: profileBindingIdsSchema.default([]),
 });
 
-export const createEnvironmentProfileInputSchema = profileFields
-  .extend({
-    environmentId: z.number().int().positive(),
-    isAnonymous: z.boolean().default(false),
-  })
-  .superRefine((profile, context) => {
-    if (
-      profile.isAnonymous &&
-      (profile.cookieIds.length || profile.headerIds.length)
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['isAnonymous'],
-        message: 'Anonymous profiles cannot include cookies or headers',
-      });
-    }
-  });
+export const createEnvironmentProfileInputSchema = profileFields.extend({
+  environmentId: z.number().int().positive(),
+});
 
 export const updateEnvironmentProfileInputSchema = profileFields
   .partial()

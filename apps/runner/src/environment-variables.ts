@@ -20,7 +20,8 @@ export class RuntimeEnvironmentError extends Error {
       | 'MISSING_ENVIRONMENT_VARIABLES'
       | 'ENVIRONMENT_VARIABLE_DECRYPTION_FAILED'
       | 'INVALID_ENVIRONMENT_COOKIES'
-      | 'INVALID_ENVIRONMENT_HEADERS',
+      | 'INVALID_ENVIRONMENT_HEADERS'
+      | 'INVALID_EXECUTION_SNAPSHOT',
     message: string,
   ) {
     super(message);
@@ -117,7 +118,9 @@ export function resolveRuntimeHeaders(
   } catch (error) {
     throw new RuntimeEnvironmentError(
       'INVALID_ENVIRONMENT_HEADERS',
-      error instanceof Error ? error.message : 'Environment headers are invalid',
+      error instanceof Error
+        ? error.message
+        : 'Environment headers are invalid',
     );
   }
 }
@@ -257,7 +260,7 @@ export function resolveRuntimeEnvironment(
   if (missing.length) {
     throw new RuntimeEnvironmentError(
       'MISSING_ENVIRONMENT_VARIABLES',
-      `Execution requires variables missing from the selected environment: ${missing.join(', ')}`,
+      `Execution requires variables missing from the selected environment profile: ${missing.join(', ')}`,
     );
   }
   const values: Record<string, string> = {};

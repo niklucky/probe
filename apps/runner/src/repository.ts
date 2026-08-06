@@ -4,9 +4,13 @@ import {
   automationExecutionArtifacts,
   automationExecutionJobs,
   db,
+  environmentCookies,
+  environmentHeaders,
   environmentProfileVariables,
   environmentProfileCookies,
   environmentProfileHeaders,
+  environmentProfiles,
+  environmentVariables,
   eq,
   inArray,
   lt,
@@ -16,6 +20,23 @@ import {
 
 type Database = typeof db;
 type Status = typeof automationExecutionJobs.$inferSelect.status;
+
+export function isCurrentEnvironmentProfileSnapshot(
+  snapshot: {
+    environmentId: number;
+    environmentProfileRevision: number | null;
+  },
+  profile:
+    | { environmentId: number; revision: number; enabled: boolean }
+    | null
+    | undefined,
+) {
+  return Boolean(
+    profile?.enabled &&
+    profile.environmentId === snapshot.environmentId &&
+    profile.revision === snapshot.environmentProfileRevision,
+  );
+}
 
 export function staleRecoveryValues(job: {
   attempt: number;
@@ -58,9 +79,7 @@ export function isRunnableExecutionSnapshot(payload: {
   if (
     !payload.environmentProfileId ||
     !payload.environmentProfile ||
-    !payload.environmentProfile.enabled ||
-    payload.environmentProfile.environmentId !== payload.environmentId ||
-    payload.environmentProfile.revision !== payload.environmentProfileRevision
+    !isCurrentEnvironmentProfileSnapshot(payload, payload.environmentProfile)
   ) {
     return false;
   }
@@ -121,77 +140,81 @@ export function createRunnerRepository(database: Database = db) {
         },
       });
     },
+    getEnvironmentProfileSnapshot(id: number) {
+      return database.query.environmentProfiles.findFirst({
+        where: eq(environmentProfiles.id, id),
+        columns: {
+          environmentId: true,
+          revision: true,
+          enabled: true,
+        },
+      });
+    },
     async listEnvironmentVariables(profileId: number, keys: string[]) {
       if (!keys.length) return Promise.resolve([]);
-      const rows = await database.query.environmentProfileVariables.findMany({
-        where: eq(environmentProfileVariables.profileId, profileId),
-        with: {
-          variable: {
-            columns: {
-              key: true,
-              encryptedValue: true,
-              isSecret: true,
-            },
-          },
-        },
-      });
-      const selected = new Set(keys);
-      return rows
-        .map(({ variable }) => variable)
-        .filter((variable) => selected.has(variable.key));
+      return database
+        .select({
+          key: environmentVariables.key,
+          encryptedValue: environmentVariables.encryptedValue,
+          isSecret: environmentVariables.isSecret,
+        })
+        .from(environmentProfileVariables)
+        .innerJoin(
+          environmentVariables,
+          eq(environmentProfileVariables.variableId, environmentVariables.id),
+        )
+        .where(
+          and(
+            eq(environmentProfileVariables.profileId, profileId),
+            inArray(environmentVariables.key, keys),
+          ),
+        )
+        .orderBy(asc(environmentVariables.key));
     },
     async listEnvironmentCookies(profileId: number) {
-      const rows = await database.query.environmentProfileCookies.findMany({
-        where: eq(environmentProfileCookies.profileId, profileId),
-        with: {
-          cookie: {
-            columns: {
-              name: true,
-              valueTemplate: true,
-              domain: true,
-              path: true,
-              httpOnly: true,
-              secure: true,
-              sameSite: true,
-              expiresAt: true,
-              enabled: true,
-            },
-          },
-        },
-      });
-      return rows
-        .map(({ cookie }) => cookie)
-        .filter(({ enabled }) => enabled)
-        .map(({ enabled: _enabled, ...cookie }) => cookie)
-        .sort((left, right) =>
-          `${left.name}:${left.path}`.localeCompare(
-            `${right.name}:${right.path}`,
+      return database
+        .select({
+          name: environmentCookies.name,
+          valueTemplate: environmentCookies.valueTemplate,
+          domain: environmentCookies.domain,
+          path: environmentCookies.path,
+          httpOnly: environmentCookies.httpOnly,
+          secure: environmentCookies.secure,
+          sameSite: environmentCookies.sameSite,
+          expiresAt: environmentCookies.expiresAt,
+        })
+        .from(environmentProfileCookies)
+        .innerJoin(
+          environmentCookies,
+          eq(environmentProfileCookies.cookieId, environmentCookies.id),
+        )
+        .where(
+          and(
+            eq(environmentProfileCookies.profileId, profileId),
+            eq(environmentCookies.enabled, true),
           ),
-        );
+        )
+        .orderBy(asc(environmentCookies.name), asc(environmentCookies.path));
     },
     async listEnvironmentHeaders(profileId: number) {
-      const rows = await database.query.environmentProfileHeaders.findMany({
-        where: eq(environmentProfileHeaders.profileId, profileId),
-        with: {
-          header: {
-            columns: {
-              name: true,
-              valueTemplate: true,
-              origin: true,
-              enabled: true,
-            },
-          },
-        },
-      });
-      return rows
-        .map(({ header }) => header)
-        .filter(({ enabled }) => enabled)
-        .map(({ enabled: _enabled, ...header }) => header)
-        .sort((left, right) =>
-          `${left.name}:${left.origin}`.localeCompare(
-            `${right.name}:${right.origin}`,
+      return database
+        .select({
+          name: environmentHeaders.name,
+          valueTemplate: environmentHeaders.valueTemplate,
+          origin: environmentHeaders.origin,
+        })
+        .from(environmentProfileHeaders)
+        .innerJoin(
+          environmentHeaders,
+          eq(environmentProfileHeaders.headerId, environmentHeaders.id),
+        )
+        .where(
+          and(
+            eq(environmentProfileHeaders.profileId, profileId),
+            eq(environmentHeaders.enabled, true),
           ),
-        );
+        )
+        .orderBy(asc(environmentHeaders.name), asc(environmentHeaders.origin));
     },
     async start(id: number, workerId: string) {
       const now = new Date();

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { isRunnableExecutionSnapshot, staleRecoveryValues } from './repository';
+import {
+  isCurrentEnvironmentProfileSnapshot,
+  isRunnableExecutionSnapshot,
+  staleRecoveryValues,
+} from './repository';
 
 describe('abandoned execution recovery', () => {
   test('requeues a stale job when a retry remains', () => {
@@ -99,5 +103,18 @@ describe('execution snapshot validation', () => {
         automation: { ...payload.automation, status: 'accepted' },
       }),
     ).toBe(false);
+  });
+
+  test('detects profile drift after bindings have loaded', () => {
+    expect(
+      isCurrentEnvironmentProfileSnapshot(payload, payload.environmentProfile),
+    ).toBe(true);
+    expect(
+      isCurrentEnvironmentProfileSnapshot(payload, {
+        ...payload.environmentProfile,
+        revision: 3,
+      }),
+    ).toBe(false);
+    expect(isCurrentEnvironmentProfileSnapshot(payload, undefined)).toBe(false);
   });
 });

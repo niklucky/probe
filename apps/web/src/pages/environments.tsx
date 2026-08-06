@@ -126,6 +126,8 @@ export function EnvironmentsPage() {
     name: string;
   } | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
+  const [editingProfileIsAnonymous, setEditingProfileIsAnonymous] =
+    useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [profileError, setProfileError] = useState('');
   const input = { projectId: id, productId };
@@ -266,6 +268,7 @@ export function EnvironmentsPage() {
     utils.environments.listProfiles.invalidate(profileInput);
   const resetProfileEditor = () => {
     setEditingProfileId(null);
+    setEditingProfileIsAnonymous(false);
     setProfileForm(emptyProfileForm);
     setProfileError('');
   };
@@ -385,11 +388,8 @@ export function EnvironmentsPage() {
     event.preventDefault();
     if (!profilesEnvironment) return;
     if (editingProfileId) {
-      const current = profiles.find(
-        (profile) => profile.id === editingProfileId,
-      );
       updateProfile.mutate(
-        current?.isAnonymous
+        editingProfileIsAnonymous
           ? {
               id: editingProfileId,
               enabled: profileForm.enabled,
@@ -400,7 +400,6 @@ export function EnvironmentsPage() {
     } else {
       createProfile.mutate({
         environmentId: profilesEnvironment.id,
-        isAnonymous: false,
         ...profileForm,
       });
     }
@@ -721,10 +720,7 @@ export function EnvironmentsPage() {
                     setProfileForm({ ...profileForm, name: event.target.value })
                   }
                   placeholder="Authenticated User"
-                  disabled={profiles.some(
-                    (profile) =>
-                      profile.id === editingProfileId && profile.isAnonymous,
-                  )}
+                  disabled={editingProfileIsAnonymous}
                   required
                 />
               </div>
@@ -778,12 +774,7 @@ export function EnvironmentsPage() {
                         <Checkbox
                           checked={profileForm[field].includes(item.id)}
                           disabled={
-                            field !== 'variableIds' &&
-                            profiles.some(
-                              (profile) =>
-                                profile.id === editingProfileId &&
-                                profile.isAnonymous,
-                            )
+                            field !== 'variableIds' && editingProfileIsAnonymous
                           }
                           onCheckedChange={(checked) =>
                             toggleProfileBinding(
@@ -858,6 +849,7 @@ export function EnvironmentsPage() {
                     size="icon"
                     onClick={() => {
                       setEditingProfileId(profile.id);
+                      setEditingProfileIsAnonymous(profile.isAnonymous);
                       setProfileForm({
                         name: profile.name,
                         enabled: profile.enabled,

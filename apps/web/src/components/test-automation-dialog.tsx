@@ -375,6 +375,9 @@ export function TestAutomationDialog({
                 automationId={selectedAutomation.id}
                 environmentId={selectedAutomation.environmentId}
                 preferredProfileId={selectedAutomation.environmentProfileId}
+                preferredProfileRevision={
+                  selectedAutomation.environmentProfileRevision
+                }
               />
             )}
           </div>
@@ -401,10 +404,12 @@ function AutomationExecutionHistory({
   automationId,
   environmentId,
   preferredProfileId,
+  preferredProfileRevision,
 }: {
   automationId: number;
   environmentId: number;
   preferredProfileId: number | null;
+  preferredProfileRevision: number | null;
 }) {
   const [error, setError] = useState('');
   const [captureVideo, setCaptureVideo] = useState(false);
@@ -418,9 +423,8 @@ function AutomationExecutionHistory({
     { automationId },
     { refetchInterval: 2000 },
   );
-  const { data: profiles = [] } = trpc.environments.listProfiles.useQuery({
-    environmentId,
-  });
+  const { data: profiles = [], isLoading: profilesLoading } =
+    trpc.environments.listProfiles.useQuery({ environmentId });
   useEffect(() => {
     setProfileId(preferredProfileId ? String(preferredProfileId) : '');
   }, [automationId, preferredProfileId]);
@@ -440,6 +444,14 @@ function AutomationExecutionHistory({
     onSuccess: ({ url }) => window.open(url, '_blank', 'noopener,noreferrer'),
     onError: (requestError) => setError(requestError.message),
   });
+  const selectedProfile = profiles.find(
+    (profile) => profile.id === Number(profileId),
+  );
+  const hasRunnableProfile = Boolean(
+    selectedProfile?.enabled &&
+    selectedProfile.id === preferredProfileId &&
+    selectedProfile.revision === preferredProfileRevision,
+  );
 
   return (
     <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
@@ -462,10 +474,18 @@ function AutomationExecutionHistory({
               <option
                 key={profile.id}
                 value={profile.id}
-                disabled={!profile.enabled}
+                disabled={
+                  !profile.enabled ||
+                  profile.id !== preferredProfileId ||
+                  profile.revision !== preferredProfileRevision
+                }
               >
                 {profile.name}
                 {!profile.enabled ? ' (disabled)' : ''}
+                {profile.id === preferredProfileId &&
+                profile.revision !== preferredProfileRevision
+                  ? ' (changed)'
+                  : ''}
               </option>
             ))}
           </select>
@@ -499,7 +519,7 @@ function AutomationExecutionHistory({
           </label>
           <Button
             size="sm"
-            disabled={queue.isPending || !profileId}
+            disabled={queue.isPending || !hasRunnableProfile}
             onClick={() =>
               queue.mutate({
                 automationId,
@@ -516,6 +536,12 @@ function AutomationExecutionHistory({
           </Button>
         </div>
       </div>
+      {!profilesLoading && !hasRunnableProfile && (
+        <p className="text-sm text-destructive">
+          The automation&apos;s environment profile was deleted, disabled, or
+          changed. Regenerate the automation before running it.
+        </p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {jobs.length ? (
         jobs.map((job) => (

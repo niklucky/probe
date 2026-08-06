@@ -5,6 +5,8 @@ import {
   automationRepairSessions,
   db,
   eq,
+  environmentProfileVariables,
+  environmentProfiles,
   environmentVariables,
   environments,
   products,
@@ -63,6 +65,14 @@ integrationTest(
           createdById: user!.id,
         })
         .returning();
+      const [profile] = await db
+        .insert(environmentProfiles)
+        .values({
+          environmentId: environment!.id,
+          name: 'Authenticated User',
+          createdById: user!.id,
+        })
+        .returning();
       const [suite] = await db
         .insert(testSuites)
         .values({
@@ -102,6 +112,9 @@ integrationTest(
           testCaseId: testCase!.id,
           sourceTestCaseVersionId: caseVersion!.id,
           environmentId: environment!.id,
+          environmentProfileId: profile!.id,
+          environmentProfileName: profile!.name,
+          environmentProfileRevision: profile!.revision,
           versionNumber: 1,
           status: 'accepted',
           source: "import { test } from '@playwright/test';",
@@ -116,6 +129,9 @@ integrationTest(
         projectId: project!.id,
         automationId: automation!.id,
         environmentId: environment!.id,
+        environmentProfileId: profile!.id,
+        environmentProfileName: profile!.name,
+        environmentProfileRevision: profile!.revision,
         requestedById: user!.id,
         settings: {
           browser: 'chromium',
@@ -133,31 +149,40 @@ integrationTest(
       });
 
       const repository = createRunnerRepository();
-      await db.insert(environmentVariables).values([
-        {
-          environmentId: environment!.id,
-          key: 'username',
-          encryptedValue: 'encrypted-username',
-          isSecret: false,
-          createdById: user!.id,
-        },
-        {
-          environmentId: environment!.id,
-          key: 'password',
-          encryptedValue: 'encrypted-password',
-          isSecret: true,
-          createdById: user!.id,
-        },
-        {
-          environmentId: environment!.id,
-          key: 'unrelated',
-          encryptedValue: 'must-not-be-loaded',
-          isSecret: true,
-          createdById: user!.id,
-        },
-      ]);
+      const insertedVariables = await db
+        .insert(environmentVariables)
+        .values([
+          {
+            environmentId: environment!.id,
+            key: 'username',
+            encryptedValue: 'encrypted-username',
+            isSecret: false,
+            createdById: user!.id,
+          },
+          {
+            environmentId: environment!.id,
+            key: 'password',
+            encryptedValue: 'encrypted-password',
+            isSecret: true,
+            createdById: user!.id,
+          },
+          {
+            environmentId: environment!.id,
+            key: 'unrelated',
+            encryptedValue: 'must-not-be-loaded',
+            isSecret: true,
+            createdById: user!.id,
+          },
+        ])
+        .returning();
+      await db.insert(environmentProfileVariables).values(
+        insertedVariables.map((variable) => ({
+          profileId: profile!.id,
+          variableId: variable.id,
+        })),
+      );
       const selectedVariables = await repository.listEnvironmentVariables(
-        environment!.id,
+        profile!.id,
         ['username', 'password'],
       );
       expect(selectedVariables.map(({ key }) => key).sort()).toEqual([
@@ -184,6 +209,9 @@ integrationTest(
           testCaseId: testCase!.id,
           sourceTestCaseVersionId: caseVersion!.id,
           environmentId: environment!.id,
+          environmentProfileId: profile!.id,
+          environmentProfileName: profile!.name,
+          environmentProfileRevision: profile!.revision,
           versionNumber: 2,
           status: 'generated',
           source: "import { test } from '@playwright/test';",
@@ -198,6 +226,9 @@ integrationTest(
           projectId: project!.id,
           automationId: candidate!.id,
           environmentId: environment!.id,
+          environmentProfileId: profile!.id,
+          environmentProfileName: profile!.name,
+          environmentProfileRevision: profile!.revision,
           requestedById: user!.id,
           settings: {
             browser: 'chromium',

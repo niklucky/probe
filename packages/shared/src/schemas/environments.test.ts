@@ -44,32 +44,33 @@ describe('environment variable placeholders', () => {
 });
 
 describe('environment profile definitions', () => {
-  const anonymous = {
+  const profile = {
     environmentId: 1,
-    name: 'Anonymous',
-    isAnonymous: true,
+    name: 'Authenticated User',
     enabled: true,
     variableIds: [1],
     cookieIds: [],
     headerIds: [],
   };
 
-  test('allows login variables but rejects browser authentication bindings for Anonymous', () => {
+  test('does not accept client control of the Anonymous flag', () => {
     expect(
-      createEnvironmentProfileInputSchema.safeParse(anonymous).success,
-    ).toBe(true);
-    expect(
-      createEnvironmentProfileInputSchema.safeParse({
-        ...anonymous,
-        cookieIds: [2],
-      }).success,
-    ).toBe(false);
-    expect(
-      createEnvironmentProfileInputSchema.safeParse({
-        ...anonymous,
-        headerIds: [3],
-      }).success,
-    ).toBe(false);
+      createEnvironmentProfileInputSchema.parse({
+        ...profile,
+        isAnonymous: true,
+      }),
+    ).not.toHaveProperty('isAnonymous');
+  });
+
+  test('rejects duplicate binding ids', () => {
+    for (const field of ['variableIds', 'cookieIds', 'headerIds'] as const) {
+      expect(
+        createEnvironmentProfileInputSchema.safeParse({
+          ...profile,
+          [field]: [2, 2],
+        }).success,
+      ).toBe(false);
+    }
   });
 });
 

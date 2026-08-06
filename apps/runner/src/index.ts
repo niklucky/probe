@@ -20,6 +20,7 @@ import {
 } from './environment-variables';
 import {
   createRunnerRepository,
+  isCurrentEnvironmentProfileSnapshot,
   isRunnableExecutionSnapshot,
 } from './repository';
 
@@ -115,6 +116,15 @@ async function runClaimedJob(jobId: number) {
       payload.environmentProfileId!,
       references,
     );
+    const currentProfile = await repository.getEnvironmentProfileSnapshot(
+      payload.environmentProfileId!,
+    );
+    if (!isCurrentEnvironmentProfileSnapshot(payload, currentProfile)) {
+      throw new RuntimeEnvironmentError(
+        'INVALID_EXECUTION_SNAPSHOT',
+        'Environment profile changed while the execution snapshot was loading',
+      );
+    }
     const resolvedEnvironment = resolveRuntimeEnvironment(
       references,
       variables,
