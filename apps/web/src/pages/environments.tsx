@@ -41,6 +41,7 @@ const emptyForm = {
   name: '',
   type: 'development' as EnvironmentType,
   baseUrl: '',
+  testIdAttribute: 'data-testid',
   isDefault: false,
 };
 
@@ -461,6 +462,22 @@ export function EnvironmentsPage() {
           required
         />
       </div>
+      <div className="grid gap-2">
+        <Label htmlFor="environment-test-id">Test-ID attribute</Label>
+        <Input
+          id="environment-test-id"
+          value={form.testIdAttribute}
+          onChange={(event) =>
+            setForm({ ...form, testIdAttribute: event.target.value })
+          }
+          placeholder="data-testid"
+          required
+        />
+        <p className="text-xs text-muted-foreground">
+          Browser-assisted generation uses this attribute for observed
+          getByTestId locators.
+        </p>
+      </div>
       <div className="flex items-center gap-2">
         <Checkbox
           id="environment-default"
@@ -553,6 +570,7 @@ export function EnvironmentsPage() {
                       name: environment.name,
                       type: environment.type,
                       baseUrl: environment.baseUrl,
+                      testIdAttribute: environment.testIdAttribute,
                       isDefault: environment.isDefault,
                     });
                   }}

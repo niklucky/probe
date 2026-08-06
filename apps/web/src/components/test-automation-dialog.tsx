@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { BrowserAuthoringSession } from '@probe/shared';
 import { trpc } from '@/lib/trpc';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertCircle,
   Check,
@@ -53,6 +55,11 @@ export function TestAutomationDialog({
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
   >(null);
+  const [browserAssisted, setBrowserAssisted] = useState(false);
+  const [authoringSessionId, setAuthoringSessionId] = useState<number | null>(
+    null,
+  );
+  const invalidatedAutomationId = useRef<number | null>(null);
 
   const utils = trpc.useContext();
   const { data: environments = [] } = trpc.environments.list.useQuery(
@@ -70,6 +77,23 @@ export function TestAutomationDialog({
   const { data: automations = [] } = trpc.testAutomations.list.useQuery(
     { testCaseId },
     { enabled: open },
+  );
+  const { data: authoringSessions = [] } = trpc.browserAuthoring.list.useQuery(
+    { testCaseId },
+    { enabled: open },
+  );
+  const { data: authoringSession } = trpc.browserAuthoring.get.useQuery(
+    { id: authoringSessionId || 0 },
+    {
+      enabled: open && Boolean(authoringSessionId),
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        return status &&
+          ['completed', 'failed', 'cancelled', 'timed_out'].includes(status)
+          ? false
+          : 1500;
+      },
+    },
   );
 
   useEffect(() => {
@@ -91,8 +115,46 @@ export function TestAutomationDialog({
       setSource('');
       setError('');
       setSelectedAutomationId(null);
+      setAuthoringSessionId(null);
+      invalidatedAutomationId.current = null;
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || authoringSessionId) return;
+    const active = authoringSessions.find(
+      ({ status }) =>
+        !['completed', 'failed', 'cancelled', 'timed_out'].includes(status),
+    );
+    if (active) {
+      setBrowserAssisted(true);
+      setAuthoringSessionId(active.id);
+    }
+  }, [authoringSessionId, authoringSessions, open]);
+
+  useEffect(() => {
+    if (!authoringSession?.generatedAutomationId) return;
+    const automation = automations.find(
+      ({ id }) => id === authoringSession.generatedAutomationId,
+    );
+    if (!automation) {
+      if (
+        invalidatedAutomationId.current !==
+        authoringSession.generatedAutomationId
+      ) {
+        invalidatedAutomationId.current =
+          authoringSession.generatedAutomationId;
+        utils.testAutomations.list.invalidate({ testCaseId });
+      }
+      return;
+    }
+    if (automation) {
+      invalidatedAutomationId.current = null;
+      setProposalId(automation.id);
+      setSelectedAutomationId(automation.id);
+      setSource(automation.source);
+    }
+  }, [authoringSession, automations, testCaseId, utils.testAutomations.list]);
 
   const generate = trpc.testAutomations.generate.useMutation({
     onSuccess: (automation) => {
@@ -123,19 +185,56 @@ export function TestAutomationDialog({
     },
     onError: (requestError) => setError(requestError.message),
   });
+  const startBrowserAuthoring = trpc.browserAuthoring.start.useMutation({
+    onSuccess: (session) => {
+      setAuthoringSessionId(session.id);
+      setError('');
+      utils.browserAuthoring.list.invalidate({ testCaseId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const cancelBrowserAuthoring = trpc.browserAuthoring.cancel.useMutation({
+    onSuccess: () => {
+      setError('');
+      utils.browserAuthoring.list.invalidate({ testCaseId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
 
   const selectedConnection = connectionId
     ? connectionId.startsWith('env:')
       ? connectionId
       : Number(connectionId)
     : undefined;
-  const busy = generate.isPending || accept.isPending || discard.isPending;
+  const authoringActive = Boolean(
+    authoringSession &&
+    !['completed', 'failed', 'cancelled', 'timed_out'].includes(
+      authoringSession.status,
+    ),
+  );
+  const busy =
+    generate.isPending ||
+    accept.isPending ||
+    discard.isPending ||
+    startBrowserAuthoring.isPending ||
+    cancelBrowserAuthoring.isPending ||
+    authoringActive;
   const selectedAutomation = automations.find(
     (automation) => automation.id === selectedAutomationId,
   );
 
   const requestGeneration = () => {
     setError('');
+    if (browserAssisted) {
+      startBrowserAuthoring.mutate({
+        testCaseId,
+        sourceTestCaseVersionId,
+        environmentId: Number(environmentId),
+        environmentProfileId: Number(environmentProfileId),
+        connectionId: selectedConnection,
+      });
+      return;
+    }
     generate.mutate({
       testCaseId,
       sourceTestCaseVersionId,
@@ -229,6 +328,37 @@ export function TestAutomationDialog({
             </div>
           </div>
 
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <Checkbox
+              id="browser-assisted-generation"
+              checked={browserAssisted}
+              disabled={authoringActive}
+              onCheckedChange={(checked) =>
+                setBrowserAssisted(checked === true)
+              }
+            />
+            <div className="grid gap-1">
+              <Label htmlFor="browser-assisted-generation">
+                Browser-assisted generation
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                Let the model inspect and interact with the selected environment
+                before writing and validating the test. This may take several
+                minutes and use additional AI tokens.
+              </p>
+            </div>
+          </div>
+
+          {authoringSession && (
+            <BrowserAuthoringProgress
+              session={authoringSession}
+              cancelling={cancelBrowserAuthoring.isPending}
+              onCancel={() =>
+                cancelBrowserAuthoring.mutate({ id: authoringSession.id })
+              }
+            />
+          )}
+
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -293,7 +423,11 @@ export function TestAutomationDialog({
               onClick={requestGeneration}
             >
               <Code2 className="mr-2 h-4 w-4" />
-              {generate.isPending ? 'Generating…' : 'Generate automation'}
+              {startBrowserAuthoring.isPending
+                ? 'Starting browser…'
+                : generate.isPending
+                  ? 'Generating…'
+                  : 'Generate automation'}
             </Button>
           )}
 
@@ -387,6 +521,92 @@ export function TestAutomationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const authoringPhases = [
+  ['starting_browser', 'Starting browser'],
+  ['inspecting_page', 'Inspecting page'],
+  ['exploring_manual_steps', 'Exploring manual-test steps'],
+  ['generating_automation', 'Generating automation'],
+  ['validating_automation', 'Validating automation'],
+  ['complete', 'Complete'],
+] as const;
+
+function BrowserAuthoringProgress({
+  session,
+  cancelling,
+  onCancel,
+}: {
+  session: BrowserAuthoringSession;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  const terminal = ['completed', 'failed', 'cancelled', 'timed_out'].includes(
+    session.status,
+  );
+  const currentIndex = authoringPhases.findIndex(
+    ([phase]) => phase === session.phase,
+  );
+  return (
+    <div className="grid gap-3 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Browser-assisted progress</div>
+          <div className="text-xs text-muted-foreground">
+            {session.toolCallCount} of {session.maxToolCalls} browser actions ·{' '}
+            {session.totalTokens ?? 0} AI tokens
+          </div>
+        </div>
+        {!terminal && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={cancelling}
+            onClick={onCancel}
+          >
+            <StopCircle className="mr-2 h-4 w-4" />
+            {cancelling ? 'Cancelling…' : 'Cancel'}
+          </Button>
+        )}
+      </div>
+      <ol className="grid gap-1 text-sm sm:grid-cols-3">
+        {authoringPhases.map(([phase, label], index) => (
+          <li
+            key={phase}
+            className={
+              index <= currentIndex && session.phase !== 'failed'
+                ? 'text-foreground'
+                : 'text-muted-foreground'
+            }
+          >
+            {index < currentIndex || session.status === 'completed' ? '✓ ' : ''}
+            {label}
+          </li>
+        ))}
+      </ol>
+      {session.status === 'completed' &&
+        session.validationStatus !== 'passed' && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Proposal generated; validation did not pass</AlertTitle>
+            <AlertDescription>
+              {session.failureReason ||
+                'Review and edit the proposal before accepting it.'}
+            </AlertDescription>
+          </Alert>
+        )}
+      {['failed', 'cancelled', 'timed_out'].includes(session.status) && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Browser-assisted generation {session.status}</AlertTitle>
+          <AlertDescription>
+            {session.failureReason || 'The session did not complete.'}
+          </AlertDescription>
+        </Alert>
+      )}
+    </div>
   );
 }
 

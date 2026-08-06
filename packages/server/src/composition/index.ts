@@ -34,6 +34,8 @@ import { createAutomationExecutionRepository } from '../repositories/automation-
 import { createAutomationExecutionService } from '../services/automation-executions/service';
 import { createAutomationRepairRepository } from '../repositories/automation-repairs/repository';
 import { createAutomationRepairService } from '../services/automation-repairs/service';
+import { createBrowserAuthoringRepository } from '../repositories/browser-authoring/repository';
+import { createBrowserAuthoringService } from '../services/browser-authoring/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -69,6 +71,7 @@ export function createServices() {
     artifactLimitMb: serverEnv.RUNNER_ARTIFACT_LIMIT_MB,
     networkPolicy: serverEnv.RUNNER_NETWORK_POLICY,
   };
+  const testAutomationRepository = createTestAutomationRepository();
   return {
     auth: createAuthService(userRepository),
     files: createFileService(
@@ -88,7 +91,14 @@ export function createServices() {
       environments,
     ),
     testAutomations: createTestAutomationService(
-      createTestAutomationRepository(),
+      testAutomationRepository,
+      authorization,
+      aiConnections,
+      environments,
+    ),
+    browserAuthoring: createBrowserAuthoringService(
+      createBrowserAuthoringRepository(),
+      testAutomationRepository,
       authorization,
       aiConnections,
       environments,

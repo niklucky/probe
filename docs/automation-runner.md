@@ -100,6 +100,16 @@ Worker:
 
 - `RUNNER_ID`, `RUNNER_POLL_MS`, `RUNNER_STALE_SECONDS`
 - `RUNNER_ARTIFACT_RETENTION_DAYS`
+- the same `RUNNER_VERSION`, execution image, resource-limit, and dedicated
+  network settings used by the API; browser authoring uses them before source
+  generation and again for fresh-context validation
 - `ENVIRONMENT_VARIABLES_MASTER_KEY` (the same stable key used by the API)
+- `AI_MASTER_KEY`, `AI_CONNECTIONS_JSON`, and `AI_APPROVED_LOCAL_HOSTS` (the
+  same values used by the API) so the isolated worker can run the bounded AI
+  browser-tool loop without placing provider credentials in queue rows
 - `DATABASE_URL` and MinIO connection variables; `MINIO_SECRET_KEY` is required
   and has no default
+
+Browser-authoring sessions persist only sanitized semantic snapshots and tool
+results. Resolved variables, cookies, headers, screenshots, traces, and videos
+are never written to authoring-session records or sent to the AI provider.

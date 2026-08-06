@@ -11,6 +11,7 @@ import type {
   StructuredGenerationRequest,
   StructuredGenerationResult,
 } from './types';
+import { runBoundedToolLoop } from './tool-loop';
 
 type Fetch = (
   input: string | URL | Request,
@@ -62,7 +63,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
     config.apiKey || '',
     ...Object.values(config.headers || {}),
   ];
-  return {
+  const adapter: AiAdapter = {
     async generateStructured<T>(
       request: StructuredGenerationRequest,
     ): Promise<StructuredGenerationResult<T>> {
@@ -79,6 +80,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
         const response = await fetcher(joinUrl(endpoint, 'chat/completions'), {
           method: 'POST',
           redirect: 'error',
+          signal: request.signal,
           headers: { ...requestHeaders(config), ...auth },
           body: JSON.stringify({
             model: config.model,
@@ -92,6 +94,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
               },
             ],
             temperature: request.temperature,
+            max_tokens: request.maxOutputTokens,
             response_format: supportsNativeJsonSchema
               ? {
                   type: 'json_schema',
@@ -134,6 +137,12 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
         throw normalizeProviderError(error, secretValues);
       }
     },
+    async runToolLoop(request) {
+      return runBoundedToolLoop(
+        (generation) => adapter.generateStructured(generation),
+        request,
+      );
+    },
     async testConnection(): Promise<ConnectionTestResult> {
       const started = Date.now();
       try {
@@ -167,6 +176,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
       }
     },
   };
+  return adapter;
 }
 
 function anthropicAdapter(
@@ -183,7 +193,7 @@ function anthropicAdapter(
     config.apiKey || '',
     ...Object.values(config.headers || {}),
   ];
-  return {
+  const adapter: AiAdapter = {
     async generateStructured<T>(
       request: StructuredGenerationRequest,
     ): Promise<StructuredGenerationResult<T>> {
@@ -192,10 +202,11 @@ function anthropicAdapter(
         const response = await fetcher(joinUrl(endpoint, 'messages'), {
           method: 'POST',
           redirect: 'error',
+          signal: request.signal,
           headers,
           body: JSON.stringify({
             model: config.model,
-            max_tokens: 4096,
+            max_tokens: request.maxOutputTokens ?? 4096,
             system: request.system,
             messages: [{ role: 'user', content: request.prompt }],
             temperature: request.temperature,
@@ -248,6 +259,12 @@ function anthropicAdapter(
         throw normalizeProviderError(error, secretValues);
       }
     },
+    async runToolLoop(request) {
+      return runBoundedToolLoop(
+        (generation) => adapter.generateStructured(generation),
+        request,
+      );
+    },
     async testConnection(): Promise<ConnectionTestResult> {
       const started = Date.now();
       try {
@@ -281,6 +298,7 @@ function anthropicAdapter(
       }
     },
   };
+  return adapter;
 }
 
 export function createAiAdapter(
