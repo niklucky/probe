@@ -28,6 +28,7 @@ describe('AI provider adapters', () => {
 
     const result = await adapter.generateStructured<{ answer: number }>({
       prompt: 'answer',
+      maxOutputTokens: 123,
       schema: {
         type: 'object',
         properties: { answer: { type: 'number' } },
@@ -39,8 +40,41 @@ describe('AI provider adapters', () => {
     expect(result.usage?.totalTokens).toBe(5);
     expect(String(requests[0])).toEndWith('/chat/completions');
     expect(requestBodies[0]).toMatchObject({
+      max_tokens: 123,
       response_format: { type: 'json_object' },
     });
+    expect(requestBodies[0]).not.toHaveProperty('max_completion_tokens');
+  });
+
+  test('uses the OpenAI output token parameter for current models', async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const adapter = createAiAdapter(
+      {
+        provider: 'openai',
+        model: 'gpt-5.6-terra',
+        apiKey: 'test-key',
+      },
+      async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return Response.json({
+          model: 'gpt-5.6-terra',
+          choices: [{ message: { content: '{"answer":42}' } }],
+        });
+      },
+    );
+
+    await adapter.generateStructured({
+      prompt: 'answer',
+      maxOutputTokens: 1_000,
+      schema: {
+        type: 'object',
+        properties: { answer: { type: 'number' } },
+        required: ['answer'],
+      },
+    });
+
+    expect(requestBody).toMatchObject({ max_completion_tokens: 1_000 });
+    expect(requestBody).not.toHaveProperty('max_tokens');
   });
 
   test('normalizes provider authentication failures without secrets', async () => {

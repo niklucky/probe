@@ -6,7 +6,7 @@ import type { AiConnectionService } from '../ai-connections/service';
 import type { EnvironmentService } from '../environments/service';
 import type { TestAutomationRepository } from '../../repositories/test-automations/repository';
 
-export const BROWSER_AUTHORING_PROMPT_VERSION = 'playwright-browser-v1';
+export const BROWSER_AUTHORING_PROMPT_VERSION = 'playwright-browser-v2';
 export const BROWSER_TOOL_CONTRACT_VERSION = 'semantic-browser-tools-v1';
 
 function publicSession<

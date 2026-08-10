@@ -10,7 +10,12 @@ durable PostgreSQL job; it never imports or evaluates automation source.
 2. Build the immutable execution image with `bun run runner:image:build`.
 3. Create a dedicated Docker network named `probe-runner-egress` and apply the
    host firewall/egress policy described below.
-4. Start the API/web processes, then run the worker separately with
+4. Create `apps/runner/.env` from `apps/runner/.env.example`. Use the same
+   `ENVIRONMENT_VARIABLES_MASTER_KEY`, `AI_MASTER_KEY`,
+   `AI_APPROVED_LOCAL_HOSTS`, and `AI_CONNECTIONS_JSON` values as the API.
+   Deployment-backed AI references such as `env:0` are resolved independently
+   by the worker and fail closed when its connection list differs from the API.
+5. Start the API/web processes, then run the worker separately with
    `bun run runner:dev`.
 
 The worker needs access to the Docker daemon. The API process must not receive

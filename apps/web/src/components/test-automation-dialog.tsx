@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BrowserAuthoringSession } from "@probe/shared";
+import type { TestSpec } from "@probe/shared/schemas/test-cases";
 import { trpc } from "@/lib/trpc";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,12 +23,18 @@ import {
   Check,
   Code2,
   Download,
+  Plus,
   Play,
   RefreshCw,
   StopCircle,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react";
+
+type EditableManualTest = TestSpec & {
+  status: "draft" | "ready" | "deprecated";
+};
 
 interface TestAutomationDialogProps {
   open: boolean;
@@ -36,6 +44,7 @@ interface TestAutomationDialogProps {
   sourceTestCaseVersionId: number;
   sourceVersionNumber: number;
   canGenerate: boolean;
+  manualTest: EditableManualTest;
 }
 
 export function TestAutomationDialog({
@@ -46,6 +55,7 @@ export function TestAutomationDialog({
   sourceTestCaseVersionId,
   sourceVersionNumber,
   canGenerate,
+  manualTest: initialManualTest,
 }: TestAutomationDialogProps) {
   const [activeSourceVersionId, setActiveSourceVersionId] = useState(
     sourceTestCaseVersionId,
@@ -63,6 +73,10 @@ export function TestAutomationDialog({
     number | null
   >(null);
   const [browserAssisted, setBrowserAssisted] = useState(false);
+  const [manualTest, setManualTest] =
+    useState<EditableManualTest>(initialManualTest);
+  const [savedManualTest, setSavedManualTest] =
+    useState<EditableManualTest>(initialManualTest);
   const [authoringSessionId, setAuthoringSessionId] = useState<number | null>(
     null,
   );
@@ -120,7 +134,14 @@ export function TestAutomationDialog({
     setActiveSourceVersionId(sourceTestCaseVersionId);
     setActiveSourceVersionNumber(sourceVersionNumber);
     setIsSourceReady(canGenerate);
-  }, [canGenerate, sourceTestCaseVersionId, sourceVersionNumber]);
+    setManualTest(initialManualTest);
+    setSavedManualTest(initialManualTest);
+  }, [
+    canGenerate,
+    initialManualTest,
+    sourceTestCaseVersionId,
+    sourceVersionNumber,
+  ]);
 
   useEffect(() => {
     if (!open) {
@@ -203,6 +224,8 @@ export function TestAutomationDialog({
       setActiveSourceVersionId(newVersion.id);
       setActiveSourceVersionNumber(newVersion.versionNumber);
       setIsSourceReady(true);
+      setManualTest((current) => ({ ...current, status: "ready" }));
+      setSavedManualTest((current) => ({ ...current, status: "ready" }));
       setError("");
       utils.testCases.list.invalidate();
     },
@@ -220,6 +243,29 @@ export function TestAutomationDialog({
     onSuccess: () => {
       setError("");
       utils.browserAuthoring.list.invalidate({ testCaseId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+
+  const updateManualTest = trpc.testCases.update.useMutation({
+    onSuccess: ({ newVersion }) => {
+      const saved: EditableManualTest = {
+        title: newVersion.title,
+        description: newVersion.description || undefined,
+        prerequisites: newVersion.prerequisites,
+        steps: newVersion.steps,
+        expectedResult: newVersion.expectedResult,
+        priority: newVersion.priority,
+        status: newVersion.status,
+        tags: newVersion.tags,
+      };
+      setActiveSourceVersionId(newVersion.id);
+      setActiveSourceVersionNumber(newVersion.versionNumber);
+      setIsSourceReady(newVersion.status === "ready");
+      setManualTest(saved);
+      setSavedManualTest(saved);
+      setError("");
+      utils.testCases.list.invalidate();
     },
     onError: (requestError) => setError(requestError.message),
   });
@@ -242,17 +288,18 @@ export function TestAutomationDialog({
     markSourceReady.isPending ||
     startBrowserAuthoring.isPending ||
     cancelBrowserAuthoring.isPending ||
+    updateManualTest.isPending ||
     authoringActive;
   const selectedAutomation = automations.find(
     (automation) => automation.id === selectedAutomationId,
   );
 
-  const requestGeneration = () => {
+  const requestGeneration = (sourceVersionId = activeSourceVersionId) => {
     setError("");
     if (browserAssisted) {
       startBrowserAuthoring.mutate({
         testCaseId,
-        sourceTestCaseVersionId: activeSourceVersionId,
+        sourceTestCaseVersionId: sourceVersionId,
         environmentId: Number(environmentId),
         environmentProfileId: Number(environmentProfileId),
         connectionId: selectedConnection,
@@ -261,16 +308,40 @@ export function TestAutomationDialog({
     }
     generate.mutate({
       testCaseId,
-      sourceTestCaseVersionId: activeSourceVersionId,
+      sourceTestCaseVersionId: sourceVersionId,
       environmentId: Number(environmentId),
       environmentProfileId: Number(environmentProfileId),
       connectionId: selectedConnection,
     });
   };
 
+  const manualTestDirty =
+    JSON.stringify(manualTest) !== JSON.stringify(savedManualTest);
+  const manualTestValid = Boolean(
+    manualTest.title.trim() &&
+    manualTest.expectedResult.trim() &&
+    manualTest.steps.some((step) => step.action.trim()),
+  );
+  const saveManualTest = (regenerate: boolean) => {
+    if (!manualTestValid) return;
+    const input = {
+      id: testCaseId,
+      ...manualTest,
+      description: manualTest.description?.trim() || undefined,
+      prerequisites: manualTest.prerequisites.filter((value) => value.trim()),
+      steps: manualTest.steps.filter((step) => step.action.trim()),
+      tags: manualTest.tags.filter((tag) => tag.trim()),
+    };
+    updateManualTest.mutate(input, {
+      onSuccess: ({ newVersion }) => {
+        if (regenerate) requestGeneration(newVersion.id);
+      },
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[920px]">
+      <DialogContent className="flex max-h-[96vh] w-[96vw] max-w-none flex-col overflow-hidden sm:max-w-none">
         <DialogHeader>
           <DialogTitle>Playwright TypeScript automation</DialogTitle>
           <DialogDescription>
@@ -280,284 +351,338 @@ export function TestAutomationDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-2">
-          {!isSourceReady && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <AlertTitle>Manual version is not ready</AlertTitle>
-                  <AlertDescription>
-                    Mark the test case Ready before requesting automation.
-                  </AlertDescription>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-end sm:self-auto"
-                  disabled={busy}
-                  onClick={() => {
-                    setError("");
-                    markSourceReady.mutate({ id: testCaseId, status: "ready" });
-                  }}
-                >
-                  <Check className="h-4 w-4" />
-                  {markSourceReady.isPending ? "Marking ready…" : "Ready"}
-                </Button>
-              </div>
-            </Alert>
-          )}
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="grid min-w-0 gap-2">
-              <Label htmlFor="automation-environment">Environment</Label>
-              <Select
-                id="automation-environment"
-                className="min-w-0"
-                value={environmentId}
-                onChange={(event) => setEnvironmentId(event.target.value)}
-              >
-                <option value="">Choose an environment</option>
-                {environments.map((environment) => (
-                  <option key={environment.id} value={environment.id}>
-                    {environment.name} — {environment.baseUrl}
-                    {environment.isDefault ? " (default)" : ""}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="grid min-w-0 gap-2">
-              <Label htmlFor="automation-profile">Browser profile</Label>
-              <Select
-                id="automation-profile"
-                className="min-w-0"
-                value={environmentProfileId}
-                onChange={(event) =>
-                  setEnvironmentProfileId(event.target.value)
-                }
-                disabled={!environmentId}
-              >
-                <option value="">Choose a profile</option>
-                {profiles.map((profile) => (
-                  <option
-                    key={profile.id}
-                    value={profile.id}
-                    disabled={!profile.enabled}
-                  >
-                    {profile.name}
-                    {profile.isAnonymous ? " (no authentication)" : ""}
-                    {!profile.enabled ? " (disabled)" : ""}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="grid min-w-0 gap-2">
-              <Label htmlFor="automation-connection">AI connection</Label>
-              <Select
-                id="automation-connection"
-                className="min-w-0"
-                value={connectionId}
-                onChange={(event) => setConnectionId(event.target.value)}
-              >
-                <option value="">Default test-authoring connection</option>
-                {connections.map((connection) => (
-                  <option key={connection.id} value={String(connection.id)}>
-                    {connection.name} — {connection.model}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3 rounded-md border p-3">
-            <Checkbox
-              id="browser-assisted-generation"
-              checked={browserAssisted}
-              disabled={authoringActive}
-              onCheckedChange={(checked) =>
-                setBrowserAssisted(checked === true)
-              }
-            />
-            <div className="grid gap-1">
-              <Label htmlFor="browser-assisted-generation">
-                Browser-assisted generation
-              </Label>
+        <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto py-2 lg:grid-cols-2 lg:overflow-hidden">
+          <section className="grid content-start gap-4 lg:overflow-y-auto lg:pr-3">
+            <div>
+              <h2 className="font-semibold">Manual test</h2>
               <p className="text-sm text-muted-foreground">
-                Let the model inspect and interact with the selected environment
-                before writing and validating the test. This may take several
-                minutes and use additional AI tokens.
+                Edit the test that the automation should implement.
               </p>
             </div>
-          </div>
-
-          {authoringSession && (
-            <BrowserAuthoringProgress
-              session={authoringSession}
-              cancelling={cancelBrowserAuthoring.isPending}
-              onCancel={() =>
-                cancelBrowserAuthoring.mutate({ id: authoringSession.id })
-              }
+            <ManualTestEditor
+              value={manualTest}
+              disabled={busy}
+              onChange={setManualTest}
             />
-          )}
-
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Automation action failed</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          {proposalId ? (
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="automation-source">Editable proposal</Label>
-                <Badge variant="outline">Syntax checked · formatted</Badge>
-              </div>
-              <Textarea
-                id="automation-source"
-                className="min-h-[360px] font-mono text-xs"
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                spellCheck={false}
-              />
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => discard.mutate({ id: proposalId })}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Discard
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={
-                    busy ||
-                    !environmentId ||
-                    !environmentProfileId ||
-                    !isSourceReady
-                  }
-                  onClick={requestGeneration}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Regenerate
-                </Button>
-                <Button
-                  type="button"
-                  disabled={busy || !source.trim()}
-                  onClick={() => accept.mutate({ id: proposalId, source })}
-                >
-                  <Check className="mr-2 h-4 w-4" />
-                  Accept
-                </Button>
-              </div>
+            <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t bg-background py-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || !manualTestDirty || !manualTestValid}
+                onClick={() => saveManualTest(false)}
+              >
+                {updateManualTest.isPending ? "Saving…" : "Save changes"}
+              </Button>
+              <Button
+                type="button"
+                disabled={
+                  busy ||
+                  !manualTestDirty ||
+                  !manualTestValid ||
+                  manualTest.status !== "ready" ||
+                  !environmentId ||
+                  !environmentProfileId
+                }
+                onClick={() => saveManualTest(true)}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Save &amp; regenerate
+              </Button>
             </div>
-          ) : (
-            <Button
-              type="button"
-              disabled={
-                busy ||
-                !environmentId ||
-                !environmentProfileId ||
-                !isSourceReady
-              }
-              onClick={requestGeneration}
-            >
-              <Code2 className="mr-2 h-4 w-4" />
-              {startBrowserAuthoring.isPending
-                ? "Starting browser…"
-                : generate.isPending
-                  ? "Generating…"
-                  : "Generate automation"}
-            </Button>
-          )}
+          </section>
 
-          <div className="grid gap-2 border-t pt-4">
-            <h3 className="font-medium">Automation history</h3>
-            {automations.length ? (
-              automations.map((automation) => (
-                <button
-                  type="button"
-                  key={automation.id}
-                  aria-pressed={selectedAutomationId === automation.id}
-                  className={`flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50 ${
-                    selectedAutomationId === automation.id
-                      ? "border-primary bg-muted/50"
-                      : ""
-                  }`}
-                  onClick={() => {
-                    setSelectedAutomationId(automation.id);
-                    if (automation.status === "generated") {
-                      setProposalId(automation.id);
-                      setSource(automation.source);
-                    }
-                  }}
-                >
+          <section className="grid content-start gap-4 lg:overflow-y-auto lg:border-l lg:pl-6 lg:pr-2">
+            <div>
+              <h2 className="font-semibold">Automation</h2>
+              <p className="text-sm text-muted-foreground">
+                Configure, generate, review, and run the Playwright test.
+              </p>
+            </div>
+            {!isSourceReady && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <div className="text-sm font-medium">
-                      Automation v{automation.versionNumber} · manual v
-                      {automation.sourceVersionNumber}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {automation.environmentName} ·{" "}
-                      {automation.environmentProfileName ?? "Legacy profile"} ·{" "}
-                      {automation.provider}/{automation.model}
-                    </div>
+                    <AlertTitle>Manual version is not ready</AlertTitle>
+                    <AlertDescription>
+                      Mark the test case Ready before requesting automation.
+                    </AlertDescription>
                   </div>
-                  <div className="flex gap-2">
-                    {automation.stale && (
-                      <Badge variant="destructive">Stale</Badge>
-                    )}
-                    <Badge
-                      variant={
-                        automation.status === "accepted" ? "default" : "outline"
-                      }
-                    >
-                      {automation.status}
-                    </Badge>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No automation has been generated for this test case.
-              </p>
-            )}
-            {selectedAutomation &&
-              selectedAutomation.status !== "generated" && (
-                <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label
-                      htmlFor={`automation-source-${selectedAutomation.id}`}
-                    >
-                      Automation v{selectedAutomation.versionNumber} source
-                    </Label>
-                    <Badge variant="outline">Read only</Badge>
-                  </div>
-                  <Textarea
-                    id={`automation-source-${selectedAutomation.id}`}
-                    className="min-h-[360px] bg-background font-mono text-xs"
-                    value={selectedAutomation.source}
-                    readOnly
-                    spellCheck={false}
-                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-end sm:self-auto"
+                    disabled={busy || manualTestDirty}
+                    onClick={() => {
+                      setError("");
+                      markSourceReady.mutate({
+                        id: testCaseId,
+                        status: "ready",
+                      });
+                    }}
+                  >
+                    <Check className="h-4 w-4" />
+                    {markSourceReady.isPending ? "Marking ready…" : "Ready"}
+                  </Button>
                 </div>
-              )}
-            {selectedAutomation?.status === "accepted" && (
-              <AutomationExecutionHistory
-                automationId={selectedAutomation.id}
-                environmentId={selectedAutomation.environmentId}
-                preferredProfileId={selectedAutomation.environmentProfileId}
-                preferredProfileRevision={
-                  selectedAutomation.environmentProfileRevision
+              </Alert>
+            )}
+
+            <div className="grid gap-4 xl:grid-cols-3">
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="automation-environment">Environment</Label>
+                <Select
+                  id="automation-environment"
+                  className="min-w-0"
+                  value={environmentId}
+                  onChange={(event) => setEnvironmentId(event.target.value)}
+                >
+                  <option value="">Choose an environment</option>
+                  {environments.map((environment) => (
+                    <option key={environment.id} value={environment.id}>
+                      {environment.name} — {environment.baseUrl}
+                      {environment.isDefault ? " (default)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="automation-profile">Browser profile</Label>
+                <Select
+                  id="automation-profile"
+                  className="min-w-0"
+                  value={environmentProfileId}
+                  onChange={(event) =>
+                    setEnvironmentProfileId(event.target.value)
+                  }
+                  disabled={!environmentId}
+                >
+                  <option value="">Choose a profile</option>
+                  {profiles.map((profile) => (
+                    <option
+                      key={profile.id}
+                      value={profile.id}
+                      disabled={!profile.enabled}
+                    >
+                      {profile.name}
+                      {profile.isAnonymous ? " (no authentication)" : ""}
+                      {!profile.enabled ? " (disabled)" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="automation-connection">AI connection</Label>
+                <Select
+                  id="automation-connection"
+                  className="min-w-0"
+                  value={connectionId}
+                  onChange={(event) => setConnectionId(event.target.value)}
+                >
+                  <option value="">Default test-authoring connection</option>
+                  {connections.map((connection) => (
+                    <option key={connection.id} value={String(connection.id)}>
+                      {connection.name} — {connection.model}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3 rounded-md border p-3">
+              <Checkbox
+                id="browser-assisted-generation"
+                checked={browserAssisted}
+                disabled={authoringActive}
+                onCheckedChange={(checked) =>
+                  setBrowserAssisted(checked === true)
+                }
+              />
+              <div className="grid gap-1">
+                <Label htmlFor="browser-assisted-generation">
+                  Browser-assisted generation
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Let the model inspect and interact with the selected
+                  environment before writing and validating the test. This may
+                  take several minutes and use additional AI tokens.
+                </p>
+              </div>
+            </div>
+
+            {authoringSession && (
+              <BrowserAuthoringProgress
+                session={authoringSession}
+                cancelling={cancelBrowserAuthoring.isPending}
+                onCancel={() =>
+                  cancelBrowserAuthoring.mutate({ id: authoringSession.id })
                 }
               />
             )}
-          </div>
+
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Automation action failed</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {proposalId ? (
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="automation-source">Editable proposal</Label>
+                  <Badge variant="outline">Syntax checked · formatted</Badge>
+                </div>
+                <Textarea
+                  id="automation-source"
+                  className="min-h-[360px] font-mono text-xs"
+                  value={source}
+                  onChange={(event) => setSource(event.target.value)}
+                  spellCheck={false}
+                />
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => discard.mutate({ id: proposalId })}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Discard
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      busy ||
+                      manualTestDirty ||
+                      !environmentId ||
+                      !environmentProfileId ||
+                      !isSourceReady
+                    }
+                    onClick={() => requestGeneration()}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Regenerate
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={busy || !source.trim()}
+                    onClick={() => accept.mutate({ id: proposalId, source })}
+                  >
+                    <Check className="mr-2 h-4 w-4" />
+                    Accept
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                disabled={
+                  busy ||
+                  manualTestDirty ||
+                  !environmentId ||
+                  !environmentProfileId ||
+                  !isSourceReady
+                }
+                onClick={() => requestGeneration()}
+              >
+                <Code2 className="mr-2 h-4 w-4" />
+                {startBrowserAuthoring.isPending
+                  ? "Starting browser…"
+                  : generate.isPending
+                    ? "Generating…"
+                    : "Generate automation"}
+              </Button>
+            )}
+
+            <div className="grid gap-2 border-t pt-4">
+              <h3 className="font-medium">Automation history</h3>
+              {automations.length ? (
+                automations.map((automation) => (
+                  <button
+                    type="button"
+                    key={automation.id}
+                    aria-pressed={selectedAutomationId === automation.id}
+                    className={`flex w-full items-center justify-between rounded-md border p-3 text-left hover:bg-muted/50 ${
+                      selectedAutomationId === automation.id
+                        ? "border-primary bg-muted/50"
+                        : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedAutomationId(automation.id);
+                      if (automation.status === "generated") {
+                        setProposalId(automation.id);
+                        setSource(automation.source);
+                      }
+                    }}
+                  >
+                    <div>
+                      <div className="text-sm font-medium">
+                        Automation v{automation.versionNumber} · manual v
+                        {automation.sourceVersionNumber}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {automation.environmentName} ·{" "}
+                        {automation.environmentProfileName ?? "Legacy profile"}{" "}
+                        · {automation.provider}/{automation.model}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {automation.stale && (
+                        <Badge variant="destructive">Stale</Badge>
+                      )}
+                      <Badge
+                        variant={
+                          automation.status === "accepted"
+                            ? "default"
+                            : "outline"
+                        }
+                      >
+                        {automation.status}
+                      </Badge>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No automation has been generated for this test case.
+                </p>
+              )}
+              {selectedAutomation &&
+                selectedAutomation.status !== "generated" && (
+                  <div className="mt-2 grid gap-2 rounded-md border bg-muted/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label
+                        htmlFor={`automation-source-${selectedAutomation.id}`}
+                      >
+                        Automation v{selectedAutomation.versionNumber} source
+                      </Label>
+                      <Badge variant="outline">Read only</Badge>
+                    </div>
+                    <Textarea
+                      id={`automation-source-${selectedAutomation.id}`}
+                      className="min-h-[360px] bg-background font-mono text-xs"
+                      value={selectedAutomation.source}
+                      readOnly
+                      spellCheck={false}
+                    />
+                  </div>
+                )}
+              {selectedAutomation?.status === "accepted" && (
+                <AutomationExecutionHistory
+                  automationId={selectedAutomation.id}
+                  environmentId={selectedAutomation.environmentId}
+                  preferredProfileId={selectedAutomation.environmentProfileId}
+                  preferredProfileRevision={
+                    selectedAutomation.environmentProfileRevision
+                  }
+                />
+              )}
+            </div>
+          </section>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -566,6 +691,252 @@ export function TestAutomationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ManualTestEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: EditableManualTest;
+  disabled: boolean;
+  onChange: (value: EditableManualTest) => void;
+}) {
+  const updateStep = (
+    index: number,
+    field: "action" | "expectedResult",
+    nextValue: string,
+  ) => {
+    const steps = value.steps.map((step, stepIndex) =>
+      stepIndex === index ? { ...step, [field]: nextValue } : step,
+    );
+    onChange({ ...value, steps });
+  };
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="manual-test-title">Title</Label>
+        <Input
+          id="manual-test-title"
+          value={value.title}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({ ...value, title: event.target.value })
+          }
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor="manual-test-description">Description</Label>
+        <Textarea
+          id="manual-test-description"
+          className="min-h-20"
+          value={value.description ?? ""}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({ ...value, description: event.target.value })
+          }
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <div className="flex items-center justify-between">
+          <Label>Prerequisites</Label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() =>
+              onChange({
+                ...value,
+                prerequisites: [...value.prerequisites, ""],
+              })
+            }
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+        {value.prerequisites.length ? (
+          value.prerequisites.map((prerequisite, index) => (
+            <div key={index} className="flex gap-2">
+              <Input
+                aria-label={`Prerequisite ${index + 1}`}
+                value={prerequisite}
+                disabled={disabled}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    prerequisites: value.prerequisites.map((item, itemIndex) =>
+                      itemIndex === index ? event.target.value : item,
+                    ),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={`Remove prerequisite ${index + 1}`}
+                disabled={disabled}
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    prerequisites: value.prerequisites.filter(
+                      (_, itemIndex) => itemIndex !== index,
+                    ),
+                  })
+                }
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">No prerequisites.</p>
+        )}
+      </div>
+
+      <div className="grid gap-3">
+        <div className="flex items-center justify-between">
+          <Label>Steps</Label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() =>
+              onChange({
+                ...value,
+                steps: [...value.steps, { action: "", expectedResult: "" }],
+              })
+            }
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add step
+          </Button>
+        </div>
+        {value.steps.map((step, index) => (
+          <div key={index} className="grid gap-2 rounded-md border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Step {index + 1}</span>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={`Remove step ${index + 1}`}
+                disabled={disabled || value.steps.length === 1}
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    steps: value.steps.filter(
+                      (_, stepIndex) => stepIndex !== index,
+                    ),
+                  })
+                }
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <Textarea
+              aria-label={`Step ${index + 1} action`}
+              placeholder="Action"
+              value={step.action}
+              disabled={disabled}
+              onChange={(event) =>
+                updateStep(index, "action", event.target.value)
+              }
+            />
+            <Textarea
+              aria-label={`Step ${index + 1} expected result`}
+              placeholder="Expected result for this step"
+              value={step.expectedResult ?? ""}
+              disabled={disabled}
+              onChange={(event) =>
+                updateStep(index, "expectedResult", event.target.value)
+              }
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor="manual-test-expected-result">
+          Overall expected result
+        </Label>
+        <Textarea
+          id="manual-test-expected-result"
+          className="min-h-24"
+          value={value.expectedResult}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({ ...value, expectedResult: event.target.value })
+          }
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="manual-test-priority">Priority</Label>
+          <Select
+            id="manual-test-priority"
+            value={value.priority}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                priority: event.target.value as EditableManualTest["priority"],
+              })
+            }
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="manual-test-status">Status</Label>
+          <Select
+            id="manual-test-status"
+            value={value.status}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({
+                ...value,
+                status: event.target.value as EditableManualTest["status"],
+              })
+            }
+          >
+            <option value="draft">Draft</option>
+            <option value="ready">Ready</option>
+            <option value="deprecated">Deprecated</option>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor="manual-test-tags">Tags</Label>
+        <Input
+          id="manual-test-tags"
+          placeholder="smoke, checkout, critical-path"
+          value={value.tags.join(", ")}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({
+              ...value,
+              tags: event.target.value.split(",").map((tag) => tag.trim()),
+            })
+          }
+        />
+        <p className="text-xs text-muted-foreground">
+          Separate tags with commas.
+        </p>
+      </div>
+    </div>
   );
 }
 

@@ -92,6 +92,9 @@ export function TestSuitePage() {
     sourceTestCaseVersionId: number;
     sourceVersionNumber: number;
     canGenerate: boolean;
+    manualTest: TestSpec & {
+      status: 'draft' | 'ready' | 'deprecated';
+    };
   } | null>(null);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{
     id: number;
@@ -447,6 +450,9 @@ export function TestSuitePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                        #{testCase.id}
+                      </span>
                       <CardTitle className="text-base">
                         {currentVersion.title}
                       </CardTitle>
@@ -517,6 +523,17 @@ export function TestSuitePage() {
                               sourceTestCaseVersionId: currentVersion.id,
                               sourceVersionNumber: currentVersion.versionNumber,
                               canGenerate: currentVersion.status === 'ready',
+                              manualTest: {
+                                title: currentVersion.title,
+                                description:
+                                  currentVersion.description || undefined,
+                                prerequisites: currentVersion.prerequisites,
+                                steps: currentVersion.steps,
+                                expectedResult: currentVersion.expectedResult,
+                                priority: currentVersion.priority,
+                                status: currentVersion.status,
+                                tags: currentVersion.tags,
+                              },
                             })
                           }
                         >

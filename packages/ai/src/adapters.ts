@@ -46,6 +46,16 @@ function requestHeaders(config: AiConnectionConfig) {
   return { 'content-type': 'application/json', ...config.headers };
 }
 
+function openAiOutputTokenLimit(
+  provider: AiConnectionConfig['provider'],
+  maxOutputTokens: number | undefined,
+) {
+  if (maxOutputTokens === undefined) return {};
+  return provider === 'openai'
+    ? { max_completion_tokens: maxOutputTokens }
+    : { max_tokens: maxOutputTokens };
+}
+
 function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
   const endpoint =
     config.endpoint ||
@@ -94,7 +104,7 @@ function openAiAdapter(config: AiConnectionConfig, fetcher: Fetch): AiAdapter {
               },
             ],
             temperature: request.temperature,
-            max_tokens: request.maxOutputTokens,
+            ...openAiOutputTokenLimit(config.provider, request.maxOutputTokens),
             response_format: supportsNativeJsonSchema
               ? {
                   type: 'json_schema',
