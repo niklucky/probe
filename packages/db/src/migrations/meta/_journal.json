@@ -148,6 +148,13 @@
       "when": 1786400793679,
       "tag": "0020_massive_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786403598845,
+      "tag": "0021_early_polaris",
+      "breakpoints": true
     }
   ]
 }

@@ -68,7 +68,7 @@ export function TeamsPage() {
       { enabled: !!projectId && canManageTeams },
     );
 
-  const utils = trpc.useContext();
+  const utils = trpc.useUtils();
 
   const createTeam = trpc.teams.create.useMutation({
     onSuccess: () => {
@@ -80,23 +80,23 @@ export function TeamsPage() {
 
   const inviteMember = trpc.invitations.invite.useMutation({
     onSuccess: () => {
-      utils.invitations.listForProject.invalidate({
-        projectId: projectIdNum,
-      });
       setIsAddMemberDialogOpen(false);
       setSelectedTeam(null);
       setInvitationEmail('');
       setInvitationError('');
     },
     onError: (error) => setInvitationError(error.message),
+    onSettled: () =>
+      utils.invitations.listForProject.invalidate({
+        projectId: projectIdNum,
+      }),
   });
 
   const cancelInvitation = trpc.invitations.cancel.useMutation({
-    onSuccess: () => {
+    onSettled: () =>
       utils.invitations.listForProject.invalidate({
         projectId: projectIdNum,
-      });
-    },
+      }),
   });
 
   const removeMember = trpc.teams.removeMember.useMutation({
@@ -115,7 +115,8 @@ export function TeamsPage() {
     }
   };
 
-  const handleAddMember = () => {
+  const handleAddMember = (event: React.FormEvent) => {
+    event.preventDefault();
     if (selectedTeam && invitationEmail.trim()) {
       setInvitationError('');
       inviteMember.mutate({
@@ -164,7 +165,7 @@ export function TeamsPage() {
     }
   };
 
-  if (isLoadingProject || isLoadingTeams || isLoadingInvitations) {
+  if (isLoadingProject || isLoadingTeams) {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
@@ -312,7 +313,7 @@ export function TeamsPage() {
                     {team.members.map((member) => (
                       <div
                         key={member.id}
-                        className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                        className="group flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
@@ -349,7 +350,7 @@ export function TeamsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                               onClick={() =>
                                 removeMember.mutate({
                                   teamId: team.id,
@@ -381,10 +382,20 @@ export function TeamsPage() {
                     <div className="mb-3 flex items-center justify-between">
                       <h3 className="text-sm font-semibold">Invitations</h3>
                       <span className="text-xs text-muted-foreground">
-                        {teamInvitations.length} total
+                        {isLoadingInvitations
+                          ? 'Loading…'
+                          : `${teamInvitations.length} total`}
                       </span>
                     </div>
-                    {teamInvitations.length > 0 ? (
+                    {isLoadingInvitations ? (
+                      <div
+                        className="space-y-2"
+                        aria-label="Loading invitations"
+                      >
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-12 w-full" />
+                      </div>
+                    ) : teamInvitations.length > 0 ? (
                       <div className="overflow-x-auto rounded-md border">
                         <div className="grid min-w-[680px] grid-cols-[minmax(220px,1fr)_150px_110px_80px] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
                           <span>Name / email</span>
@@ -450,6 +461,11 @@ export function TeamsPage() {
                         No invitations have been sent to this team.
                       </p>
                     )}
+                    {cancelInvitation.error && (
+                      <p className="mt-2 text-sm text-destructive">
+                        {cancelInvitation.error.message}
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -477,56 +493,67 @@ export function TeamsPage() {
       {/* Add Member Dialog */}
       <Dialog
         open={isAddMemberDialogOpen}
-        onOpenChange={setIsAddMemberDialogOpen}
+        onOpenChange={(open) => {
+          setIsAddMemberDialogOpen(open);
+          if (!open) {
+            setSelectedTeam(null);
+            setInvitationEmail('');
+            setInvitationError('');
+            setSelectedRole('viewer');
+            inviteMember.reset();
+          }
+        }}
       >
         <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Add Member to {selectedTeam?.name}</DialogTitle>
-            <DialogDescription>
-              Enter an email and assign a role. They can accept or decline the
-              invitation.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="invitation-email">Email</Label>
-              <Input
-                id="invitation-email"
-                type="email"
-                placeholder="teammate@example.com"
-                value={invitationEmail}
-                onChange={(event) => setInvitationEmail(event.target.value)}
-                required
-              />
+          <form onSubmit={handleAddMember}>
+            <DialogHeader>
+              <DialogTitle>Add Member to {selectedTeam?.name}</DialogTitle>
+              <DialogDescription>
+                Enter an email and assign a role. They can accept or decline the
+                invitation.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="invitation-email">Email</Label>
+                <Input
+                  id="invitation-email"
+                  type="email"
+                  placeholder="teammate@example.com"
+                  value={invitationEmail}
+                  onChange={(event) => setInvitationEmail(event.target.value)}
+                  required
+                />
+              </div>
+
+              {invitationError && (
+                <p className="text-sm text-destructive">{invitationError}</p>
+              )}
+
+              {/* Role Selection */}
+              <div className="space-y-2">
+                <Label>Role</Label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value as any)}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="qa">QA Engineer</option>
+                  <option value="manual_tester">Manual Tester</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
             </div>
-
-            {invitationError && (
-              <p className="text-sm text-destructive">{invitationError}</p>
-            )}
-
-            {/* Role Selection */}
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={selectedRole}
-                onChange={(e) => setSelectedRole(e.target.value as any)}
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={!invitationEmail.trim() || inviteMember.isPending}
               >
-                <option value="admin">Admin</option>
-                <option value="qa">QA Engineer</option>
-                <option value="manual_tester">Manual Tester</option>
-                <option value="viewer">Viewer</option>
-              </select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={handleAddMember}
-              disabled={!invitationEmail.trim() || inviteMember.isPending}
-            >
-              {inviteMember.isPending ? 'Sending...' : 'Send Invitation'}
-            </Button>
-          </DialogFooter>
+                {inviteMember.isPending ? 'Sending...' : 'Send Invitation'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

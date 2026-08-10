@@ -25,6 +25,7 @@ export function createInvitationService(
       acceptedAt: Date | null;
       declinedAt: Date | null;
       cancelledAt: Date | null;
+      expiredAt: Date | null;
       expiresAt: Date;
     },
   >(invitation: T | undefined): T {
@@ -33,6 +34,7 @@ export function createInvitationService(
       invitation.acceptedAt ||
       invitation.declinedAt ||
       invitation.cancelledAt ||
+      invitation.expiredAt ||
       invitation.expiresAt <= new Date()
     ) {
       throw new AppError('NOT_FOUND', 'Invitation is invalid or has expired');
@@ -65,6 +67,16 @@ export function createInvitationService(
       throw new AppError('NOT_FOUND', 'Invitation is invalid or has expired');
     }
     return { success: true };
+  }
+
+  function isUniqueViolation(error: unknown) {
+    let current = error;
+    for (let depth = 0; depth < 4; depth += 1) {
+      if (!current || typeof current !== 'object') return false;
+      if ('code' in current && current.code === '23505') return true;
+      current = 'cause' in current ? current.cause : undefined;
+    }
+    return false;
   }
 
   return {
@@ -110,6 +122,7 @@ export function createInvitationService(
         projectName: team.project.name,
         invitedByName: actor.name,
         registrationUrl: registrationUrl.toString(),
+        expiresAt: invitation.expiresAt,
         idempotencyKey: `team-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
       });
       return {
@@ -135,7 +148,7 @@ export function createInvitationService(
       const invitation = requireUsableInvitation(
         await repository.findByTokenHash(hashToken(token)),
       );
-      if (invitation.email !== normalizeEmail(email)) {
+      if (normalizeEmail(invitation.email) !== normalizeEmail(email)) {
         throw new AppError(
           'BAD_REQUEST',
           'Registration email must match the invitation email',
@@ -158,23 +171,21 @@ export function createInvitationService(
           ? ('accepted' as const)
           : invitation.declinedAt
             ? ('declined' as const)
-            : invitation.cancelledAt
-              ? ('cancelled' as const)
-              : invitation.expiresAt <= now
-                ? ('expired' as const)
+            : invitation.expiredAt || invitation.expiresAt <= now
+              ? ('expired' as const)
+              : invitation.cancelledAt
+                ? ('cancelled' as const)
                 : ('pending' as const),
       }));
     },
 
     async acceptById(id: number, user: { id: number; email: string }) {
-      const invitation = await repository.findPendingById(
+      const invitation = await repository.findByIdForEmail(
         id,
         normalizeEmail(user.email),
       );
-      if (!invitation) {
-        throw new AppError('NOT_FOUND', 'Invitation is invalid or has expired');
-      }
-      return acceptInvitation(invitation, user);
+      if (invitation?.acceptedAt) return { success: true };
+      return acceptInvitation(requireUsableInvitation(invitation), user);
     },
 
     async acceptByToken(token: string, user: { id: number; email: string }) {
@@ -185,17 +196,48 @@ export function createInvitationService(
     },
 
     async decline(id: number, user: { email: string }) {
-      const invitation = await repository.findPendingById(
-        id,
-        normalizeEmail(user.email),
+      requireUsableInvitation(
+        await repository.findByIdForEmail(id, normalizeEmail(user.email)),
       );
-      if (!invitation) {
-        throw new AppError('NOT_FOUND', 'Invitation is invalid or has expired');
-      }
       if (!(await repository.markDeclined(id))) {
         throw new AppError('NOT_FOUND', 'Invitation is invalid or has expired');
       }
       return { success: true };
+    },
+
+    async registerUser(
+      token: string,
+      input: { email: string; passwordHash: string; name: string },
+    ) {
+      const email = normalizeEmail(input.email);
+      try {
+        const result = await repository.registerUserAndAccept(
+          hashToken(token),
+          email,
+          {
+            email,
+            passwordHash: input.passwordHash,
+            name: input.name,
+            role: 'viewer',
+          },
+        );
+        if (result.status === 'conflict') {
+          throw new AppError('CONFLICT', 'User with this email already exists');
+        }
+        if (result.status === 'invalid') {
+          throw new AppError(
+            'NOT_FOUND',
+            'Invitation is invalid or has expired',
+          );
+        }
+        return result.user;
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        if (isUniqueViolation(error)) {
+          throw new AppError('CONFLICT', 'User with this email already exists');
+        }
+        throw error;
+      }
     },
 
     async cancel(id: number, actorId: number) {

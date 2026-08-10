@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AppError } from '@probe/shared/errors/app-error';
 import type { InvitationRepository } from '../../repositories/invitations/repository';
 import type { AuthorizationService } from '../authorization/service';
 import type { InvitationMailer } from './mailer';
@@ -7,7 +8,13 @@ import { createInvitationService } from './service';
 const actor = { id: 3, name: 'Project Owner' };
 const user = { id: 9, email: 'new@example.com' };
 
-function setup(overrides: Record<string, unknown> = {}) {
+function setup(
+  overrides: Partial<InvitationRepository> = {},
+  options: {
+    authorization?: Partial<AuthorizationService>;
+    mailer?: Partial<InvitationMailer>;
+  } = {},
+) {
   let stored: Record<string, any> | undefined;
   let sent: Record<string, any> | undefined;
   let memberAdded: Record<string, any> | undefined;
@@ -29,7 +36,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     async findMember() {
       return undefined;
     },
-    async createOrRefresh(values: Record<string, any>) {
+    async createOrRefresh(values) {
       stored = values;
       return {
         id: 12,
@@ -39,6 +46,7 @@ function setup(overrides: Record<string, unknown> = {}) {
         acceptedAt: null,
         declinedAt: null,
         cancelledAt: null,
+        expiredAt: null,
       };
     },
     async findByTokenHash() {
@@ -53,13 +61,16 @@ function setup(overrides: Record<string, unknown> = {}) {
     async findById() {
       return undefined;
     },
-    async findPendingById() {
+    async findByIdForEmail() {
       return undefined;
     },
-    async accept(id: number, values: Record<string, any>) {
+    async accept(id, values) {
       memberAdded = values;
       acceptedId = id;
       return true;
+    },
+    async registerUserAndAccept() {
+      return { status: 'invalid' as const };
     },
     async markDeclined(id: number) {
       declinedId = id;
@@ -70,24 +81,26 @@ function setup(overrides: Record<string, unknown> = {}) {
       return { id };
     },
     ...overrides,
-  } as unknown as InvitationRepository;
+  } as Partial<InvitationRepository>;
 
-  const authorization = {
+  const authorization: Partial<AuthorizationService> = {
     async require() {
       return { projectId: 2, role: 'owner' as const };
     },
     async requireProject() {
       return { projectId: 2, role: 'owner' as const };
     },
-  } as unknown as AuthorizationService;
+    ...options.authorization,
+  };
   const mailer: InvitationMailer = {
     async sendInvitation(email) {
       sent = email;
     },
+    ...options.mailer,
   };
   const service = createInvitationService(
-    repository,
-    authorization,
+    repository as InvitationRepository,
+    authorization as AuthorizationService,
     mailer,
     'https://probe.example',
   );
@@ -160,11 +173,12 @@ describe('invitation service', () => {
       acceptedAt: null,
       declinedAt: null,
       cancelledAt: null,
+      expiredAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     const context = setup({
-      async findPendingById() {
+      async findByIdForEmail() {
         return invitation;
       },
     });
@@ -180,12 +194,17 @@ describe('invitation service', () => {
 
   test('declines a pending invitation without adding membership', async () => {
     const context = setup({
-      async findPendingById() {
+      async findByIdForEmail() {
         return {
           id: 12,
           teamId: 4,
           email: user.email,
           role: 'viewer',
+          expiresAt: new Date(Date.now() + 60_000),
+          acceptedAt: null,
+          declinedAt: null,
+          cancelledAt: null,
+          expiredAt: null,
         } as any;
       },
     });
@@ -206,6 +225,7 @@ describe('invitation service', () => {
           acceptedAt: null,
           declinedAt: null,
           cancelledAt: null,
+          expiredAt: null,
         } as any;
       },
     });
@@ -226,6 +246,7 @@ describe('invitation service', () => {
           acceptedAt: null,
           declinedAt: null,
           cancelledAt: null,
+          expiredAt: null,
         } as any;
       },
     });
@@ -249,6 +270,7 @@ describe('invitation service', () => {
       acceptedAt: null,
       declinedAt: null,
       cancelledAt: null,
+      expiredAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -278,5 +300,92 @@ describe('invitation service', () => {
     expect(listed.map(({ status }) => status)).toEqual(['pending', 'expired']);
     await context.service.cancel(invitation.id, actor.id);
     expect(context.cancelledId).toBe(invitation.id);
+  });
+
+  test('treats a repeated acceptance as success', async () => {
+    const context = setup({
+      async findByIdForEmail() {
+        return {
+          id: 12,
+          teamId: 4,
+          email: user.email,
+          role: 'viewer',
+          expiresAt: new Date(Date.now() + 60_000),
+          acceptedAt: new Date(),
+          declinedAt: null,
+          cancelledAt: null,
+          expiredAt: null,
+        } as any;
+      },
+    });
+
+    await expect(context.service.acceptById(12, user)).resolves.toEqual({
+      success: true,
+    });
+    expect(context.memberAdded).toBeUndefined();
+  });
+
+  test('does not create an invitation when authorization is denied', async () => {
+    const context = setup(
+      {},
+      {
+        authorization: {
+          async require() {
+            throw new AppError('UNAUTHORIZED', 'Forbidden');
+          },
+        },
+      },
+    );
+
+    await expect(
+      context.service.invite(
+        { teamId: 4, email: user.email, role: 'viewer' },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(context.stored).toBeUndefined();
+  });
+
+  test('preserves the invitation record when email delivery fails', async () => {
+    const context = setup(
+      {},
+      {
+        mailer: {
+          async sendInvitation() {
+            throw new AppError('INTERNAL_SERVER_ERROR', 'Delivery failed');
+          },
+        },
+      },
+    );
+
+    await expect(
+      context.service.invite(
+        { teamId: 4, email: user.email, role: 'viewer' },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    expect(context.stored).toBeDefined();
+  });
+
+  test('checks authorization before cancelling an invitation', async () => {
+    const context = setup(
+      {
+        async findById() {
+          return { id: 12, teamId: 4 } as any;
+        },
+      },
+      {
+        authorization: {
+          async require() {
+            throw new AppError('UNAUTHORIZED', 'Forbidden');
+          },
+        },
+      },
+    );
+
+    await expect(context.service.cancel(12, actor.id)).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+    expect(context.cancelledId).toBeUndefined();
   });
 });

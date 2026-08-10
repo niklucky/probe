@@ -22,7 +22,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const invitationToken = searchParams.get("invitation") ?? undefined;
   const { login } = useAuth();
 
@@ -59,6 +59,17 @@ export function RegisterPage() {
     });
   };
 
+  const clearInvitation = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("invitation");
+    setSearchParams(nextParams, { replace: true });
+    setEmail("");
+  };
+
+  const invitationIsInvalid =
+    invitationQuery.error?.data?.code === "NOT_FOUND" ||
+    invitationQuery.error?.data?.code === "BAD_REQUEST";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md">
@@ -80,8 +91,20 @@ export function RegisterPage() {
 
             {invitationQuery.error && (
               <Alert variant="destructive">
-                <AlertDescription>
-                  This invitation link is invalid or has expired.
+                <AlertDescription className="space-y-2">
+                  <p>
+                    {invitationIsInvalid
+                      ? "This invitation link is invalid or has expired."
+                      : "We could not verify this invitation right now. You can retry or register without it."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={clearInvitation}
+                  >
+                    Register without invitation
+                  </Button>
                 </AlertDescription>
               </Alert>
             )}

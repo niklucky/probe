@@ -145,20 +145,28 @@ export const browserAuthoringPhaseEnum = pgEnum('browser_authoring_phase', [
 ]);
 
 // Users table
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-  name: varchar('name', { length: 255 }).notNull(),
-  role: userRoleEnum('role').notNull().default('viewer'),
-  avatarUrl: varchar('avatar_url', { length: 500 }),
-  avatarType: varchar('avatar_type', {
-    length: 50,
-    enum: ['predefined', 'custom'],
+export const users = pgTable(
+  'users',
+  {
+    id: serial('id').primaryKey(),
+    email: varchar('email', { length: 255 }).notNull(),
+    passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    role: userRoleEnum('role').notNull().default('viewer'),
+    avatarUrl: varchar('avatar_url', { length: 500 }),
+    avatarType: varchar('avatar_type', {
+      length: 50,
+      enum: ['predefined', 'custom'],
+    }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    emailUnique: uniqueIndex('users_email_unique').on(
+      sql`lower(${table.email})`,
+    ),
   }),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+);
 
 // Projects table
 export const projects = pgTable('projects', {
@@ -514,14 +522,16 @@ export const teamInvitations = pgTable(
     acceptedAt: timestamp('accepted_at'),
     declinedAt: timestamp('declined_at'),
     cancelledAt: timestamp('cancelled_at'),
+    expiredAt: timestamp('expired_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
-    teamEmailUnique: uniqueIndex('team_invitations_team_email_unique').on(
-      table.teamId,
-      table.email,
-    ),
+    teamEmailUnique: uniqueIndex('team_invitations_team_email_unique')
+      .on(table.teamId, table.email)
+      .where(
+        sql`${table.acceptedAt} is null and ${table.declinedAt} is null and ${table.cancelledAt} is null and ${table.expiredAt} is null`,
+      ),
     tokenUnique: uniqueIndex('team_invitations_token_unique').on(
       table.tokenHash,
     ),

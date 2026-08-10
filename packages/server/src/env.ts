@@ -36,6 +36,9 @@ const masterKeySchema = z
   .optional();
 
 const rawServerEnvSchema = z.object({
+  NODE_ENV: z
+    .enum(['development', 'test', 'production'])
+    .default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(11010),
   FRONTEND_URL: z.string().url().default('http://localhost:11020'),
   JWT_SECRET: z
@@ -112,14 +115,28 @@ const rawServerEnvSchema = z.object({
     (value) => (value === '' ? undefined : value),
     z.string().min(1).optional(),
   ),
-  INVITATION_FROM_EMAIL: z
-    .string()
-    .min(3)
-    .default('Probe <onboarding@resend.dev>'),
+  INVITATION_FROM_EMAIL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(3).optional(),
+  ),
 });
 
-export const serverEnvSchema = rawServerEnvSchema.transform((value) => ({
+const validatedServerEnvSchema = rawServerEnvSchema.superRefine(
+  (value, context) => {
+    if (value.NODE_ENV === 'production' && !value.INVITATION_FROM_EMAIL) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['INVITATION_FROM_EMAIL'],
+        message: 'is required in production',
+      });
+    }
+  },
+);
+
+export const serverEnvSchema = validatedServerEnvSchema.transform((value) => ({
   ...value,
+  INVITATION_FROM_EMAIL:
+    value.INVITATION_FROM_EMAIL || 'Probe <onboarding@resend.dev>',
   MINIO_PUBLIC_URL:
     value.MINIO_PUBLIC_URL ||
     `${value.MINIO_USE_SSL ? 'https' : 'http'}://${value.MINIO_ENDPOINT}:${value.MINIO_PORT}`,

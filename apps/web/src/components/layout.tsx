@@ -17,17 +17,19 @@ export function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const utils = trpc.useContext();
+  const utils = trpc.useUtils();
   const { data: pendingInvitations } = trpc.invitations.listPending.useQuery();
   const acceptInvitation = trpc.invitations.accept.useMutation({
     onSuccess: () => {
-      utils.invitations.listPending.invalidate();
       utils.projects.list.invalidate();
     },
+    onSettled: () => utils.invitations.listPending.invalidate(),
   });
   const declineInvitation = trpc.invitations.decline.useMutation({
-    onSuccess: () => utils.invitations.listPending.invalidate(),
+    onSettled: () => utils.invitations.listPending.invalidate(),
   });
+  const invitationActionError =
+    acceptInvitation.error?.message ?? declineInvitation.error?.message;
 
   return (
     <div className="min-h-screen bg-background">
@@ -116,6 +118,11 @@ export function Layout() {
       {pendingInvitations && pendingInvitations.length > 0 && (
         <div className="border-b border-primary/20 bg-primary/5">
           <div className="container mx-auto space-y-2 px-4 py-3">
+            {invitationActionError && (
+              <p className="text-sm text-destructive">
+                {invitationActionError}
+              </p>
+            )}
             {pendingInvitations.map((invitation) => (
               <div
                 key={invitation.id}

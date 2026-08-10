@@ -34,23 +34,23 @@ export function createAuthService(
             'Invitations are not configured',
           );
         }
-        await invitations.validateRegistrationInvitation(
-          email,
-          input.invitationToken,
-        );
       }
       if (await repository.findByEmail(email)) {
         throw new AppError('CONFLICT', 'User with this email already exists');
       }
-      const user = await repository.create({
-        email,
-        passwordHash: await bcrypt.hash(input.password, 10),
-        name: input.name,
-        role: 'viewer',
-      });
-      if (input.invitationToken) {
-        await invitations!.acceptByToken(input.invitationToken, user);
-      }
+      const passwordHash = await bcrypt.hash(input.password, 10);
+      const user = input.invitationToken
+        ? await invitations!.registerUser(input.invitationToken, {
+            email,
+            passwordHash,
+            name: input.name,
+          })
+        : await repository.create({
+            email,
+            passwordHash,
+            name: input.name,
+            role: 'viewer',
+          });
       return { token: issueToken(user), user };
     },
 
