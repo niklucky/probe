@@ -16,7 +16,10 @@ export const publicUserSchema = createSelectSchema(users).pick({
 });
 export const registerInputSchema = userInsertSchema
   .pick({ email: true, name: true })
-  .extend({ password: z.string().min(6) });
+  .extend({
+    password: z.string().min(6),
+    invitationToken: z.string().min(32).max(256).optional(),
+  });
 export const loginInputSchema = z.object({
   email: z.string().email(),
   password: z.string(),

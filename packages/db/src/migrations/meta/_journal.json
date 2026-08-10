@@ -134,6 +134,20 @@
       "when": 1786093615290,
       "tag": "0018_colossal_nekra",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786398545871,
+      "tag": "0019_white_wong",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786400793679,
+      "tag": "0020_massive_nightmare",
+      "breakpoints": true
     }
   ]
 }

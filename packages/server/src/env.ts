@@ -108,6 +108,14 @@ const rawServerEnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_MODEL: z.string().min(1).optional(),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  RESEND_API_KEY: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
+  INVITATION_FROM_EMAIL: z
+    .string()
+    .min(3)
+    .default('Probe <onboarding@resend.dev>'),
 });
 
 export const serverEnvSchema = rawServerEnvSchema.transform((value) => ({

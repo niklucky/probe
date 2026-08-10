@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,20 @@ export function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const invitationToken = searchParams.get("invitation") ?? undefined;
   const { login } = useAuth();
+
+  const invitationQuery = trpc.invitations.preview.useQuery(
+    { token: invitationToken ?? "" },
+    { enabled: !!invitationToken, retry: false },
+  );
+
+  useEffect(() => {
+    if (invitationQuery.data) {
+      setEmail(invitationQuery.data.email);
+    }
+  }, [invitationQuery.data]);
 
   const registerMutation = trpc.auth.register.useMutation({
     onSuccess: (data) => {
@@ -38,7 +51,12 @@ export function RegisterPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    registerMutation.mutate({ name, email, password });
+    registerMutation.mutate({
+      name,
+      email,
+      password,
+      invitationToken,
+    });
   };
 
   return (
@@ -57,6 +75,24 @@ export function RegisterPage() {
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {invitationQuery.error && (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  This invitation link is invalid or has expired.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {invitationQuery.data && (
+              <Alert>
+                <AlertDescription>
+                  You were invited to {invitationQuery.data.teamName} in{" "}
+                  {invitationQuery.data.projectName}. Creating your account will
+                  accept the invitation.
+                </AlertDescription>
               </Alert>
             )}
 
@@ -80,6 +116,7 @@ export function RegisterPage() {
                 placeholder="m@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                readOnly={!!invitationQuery.data}
                 required
               />
             </div>
@@ -102,7 +139,11 @@ export function RegisterPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={registerMutation.isPending}
+              disabled={
+                registerMutation.isPending ||
+                (!!invitationToken && invitationQuery.isLoading) ||
+                !!invitationQuery.error
+              }
             >
               {registerMutation.isPending ? (
                 <>

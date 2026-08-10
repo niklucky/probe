@@ -15,12 +15,12 @@ export function createProjectService(
     userId: number,
     operation: 'read' | 'manage' | 'own',
   ) {
-    await authorization.requireProject(userId, id, operation);
+    const access = await authorization.requireProject(userId, id, operation);
     const project = await repository.find(id);
     if (!project) {
       throw new AppError('NOT_FOUND', 'Project not found');
     }
-    return project;
+    return { project, role: access.role };
   }
 
   return {
@@ -40,8 +40,9 @@ export function createProjectService(
       });
     },
 
-    get(id: number, userId: number) {
-      return requireProject(id, userId, 'read');
+    async get(id: number, userId: number) {
+      const { project, role } = await requireProject(id, userId, 'read');
+      return { ...project, currentUserRole: role };
     },
 
     async update(input: UpdateProjectInput, userId: number) {

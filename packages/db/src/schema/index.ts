@@ -488,7 +488,44 @@ export const teamMembers = pgTable(
     joinedAt: timestamp('joined_at'),
   },
   (table) => ({
-    uniqueMember: index('unique_team_member').on(table.teamId, table.userId),
+    uniqueMember: uniqueIndex('unique_team_member').on(
+      table.teamId,
+      table.userId,
+    ),
+  }),
+);
+
+// Pending invitations are keyed by normalized email so they also work before
+// a user account exists. Only the token hash is stored in the database.
+export const teamInvitations = pgTable(
+  'team_invitations',
+  {
+    id: serial('id').primaryKey(),
+    teamId: integer('team_id')
+      .references(() => teams.id, { onDelete: 'cascade' })
+      .notNull(),
+    email: varchar('email', { length: 255 }).notNull(),
+    role: userRoleEnum('role').notNull().default('viewer'),
+    invitedById: integer('invited_by_id')
+      .references(() => users.id)
+      .notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    declinedAt: timestamp('declined_at'),
+    cancelledAt: timestamp('cancelled_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => ({
+    teamEmailUnique: uniqueIndex('team_invitations_team_email_unique').on(
+      table.teamId,
+      table.email,
+    ),
+    tokenUnique: uniqueIndex('team_invitations_token_unique').on(
+      table.tokenHash,
+    ),
+    emailIndex: index('team_invitations_email_index').on(table.email),
   }),
 );
 
@@ -1292,6 +1329,7 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
     references: [projects.id],
   }),
   members: many(teamMembers),
+  invitations: many(teamInvitations),
 }));
 
 export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
@@ -1304,6 +1342,20 @@ export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const teamInvitationsRelations = relations(
+  teamInvitations,
+  ({ one }) => ({
+    team: one(teams, {
+      fields: [teamInvitations.teamId],
+      references: [teams.id],
+    }),
+    invitedBy: one(users, {
+      fields: [teamInvitations.invitedById],
+      references: [users.id],
+    }),
+  }),
+);
 
 export const testSuitesRelations = relations(testSuites, ({ one, many }) => ({
   product: one(products, {

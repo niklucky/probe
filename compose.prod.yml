@@ -71,6 +71,8 @@ services:
       DATABASE_MIGRATIONS_PATH: /app/dist/migrations
       FRONTEND_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      INVITATION_FROM_EMAIL: "${INVITATION_FROM_EMAIL:-Probe <onboarding@resend.dev>}"
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
