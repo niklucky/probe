@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   isNull,
+  or,
   projectMembers,
   projects,
   sql,
@@ -178,7 +179,12 @@ export function createInvitationRepository(database = db) {
         .from(teamInvitations)
         .leftJoin(teams, eq(teamInvitations.teamId, teams.id))
         .leftJoin(users, sql`lower(${users.email}) = ${teamInvitations.email}`)
-        .where(eq(targetProjectId, projectId))
+        .where(
+          or(
+            eq(teams.projectId, projectId),
+            eq(teamInvitations.projectId, projectId),
+          ),
+        )
         .orderBy(desc(teamInvitations.createdAt));
     },
     findById(id: number) {

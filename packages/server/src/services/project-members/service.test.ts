@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { AppError } from '@probe/shared/errors/app-error';
 import { createProjectMemberService } from './service';
 
-function setup(options: { ownerId?: number; memberExists?: boolean } = {}) {
+function setup(
+  options: {
+    ownerId?: number;
+    memberExists?: boolean;
+    canManage?: boolean;
+  } = {},
+) {
   let updated: unknown;
   let removed = false;
   const repository = {
@@ -24,6 +31,9 @@ function setup(options: { ownerId?: number; memberExists?: boolean } = {}) {
   };
   const authorization = {
     async requireProject() {
+      if (options.canManage === false) {
+        throw new AppError('NOT_FOUND', 'Resource not found');
+      }
       return { projectId: 7, role: 'admin' as const };
     },
   };
@@ -64,6 +74,13 @@ describe('project member service', () => {
   test('reports missing memberships', async () => {
     const context = setup({ memberExists: false });
     await expect(context.service.remove(7, 2, 1)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  test('does not expose the member roster to viewers', async () => {
+    const context = setup({ canManage: false });
+    await expect(context.service.list(7, 5)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
   });

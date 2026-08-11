@@ -71,7 +71,7 @@ export function TeamsPage() {
   const { data: projectMembers, isLoading: isLoadingProjectMembers } =
     trpc.projectMembers.list.useQuery(
       { projectId: projectIdNum },
-      { enabled: !!projectId },
+      { enabled: !!projectId && canManageTeams },
     );
 
   const { data: invitations, isLoading: isLoadingInvitations } =
@@ -316,54 +316,56 @@ export function TeamsPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <CardTitle className="text-lg">Direct project members</CardTitle>
-              <CardDescription>
-                These roles apply without requiring membership in a team.
-              </CardDescription>
-            </div>
-            {canManageTeams && (
+      {canManageTeams && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg">
+                  Direct project members
+                </CardTitle>
+                <CardDescription>
+                  These roles apply without requiring membership in a team.
+                </CardDescription>
+              </div>
               <Button size="sm" onClick={() => setIsProjectInviteOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 Invite to project
               </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoadingProjectMembers ? (
-            <Skeleton className="h-16 w-full" />
-          ) : projectMembers && projectMembers.length > 0 ? (
-            <div className="space-y-2">
-              {projectMembers.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-8 w-8">
-                      {member.user.avatarUrl && (
-                        <AvatarImage
-                          src={member.user.avatarUrl}
-                          alt={member.user.name}
-                        />
-                      )}
-                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                        {member.user.name.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="text-sm font-medium">{member.user.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {member.user.email}
-                      </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {isLoadingProjectMembers ? (
+              <Skeleton className="h-16 w-full" />
+            ) : projectMembers && projectMembers.length > 0 ? (
+              <div className="space-y-2">
+                {projectMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        {member.user.avatarUrl && (
+                          <AvatarImage
+                            src={member.user.avatarUrl}
+                            alt={member.user.name}
+                          />
+                        )}
+                        <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                          {member.user.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-sm font-medium">
+                          {member.user.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {member.user.email}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {canManageTeams ? (
+                    <div className="flex items-center gap-2">
                       <select
                         aria-label={`Role for ${member.user.name}`}
                         className="rounded-md border border-input bg-background px-3 py-2 text-sm capitalize"
@@ -382,15 +384,6 @@ export function TeamsPage() {
                         <option value="manual_tester">Manual Tester</option>
                         <option value="viewer">Viewer</option>
                       </select>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className={`capitalize ${getRoleColor(member.role)}`}
-                      >
-                        {member.role.replace('_', ' ')}
-                      </Badge>
-                    )}
-                    {canManageTeams && (
                       <Button
                         variant="ghost"
                         size="icon"
@@ -405,18 +398,16 @@ export function TeamsPage() {
                       >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No one has direct project access yet.
-            </p>
-          )}
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No one has direct project access yet.
+              </p>
+            )}
 
-          {canManageTeams && (
             <div className="mt-6 border-t pt-4">
               <h3 className="mb-3 text-sm font-semibold">Direct invitations</h3>
               {(invitations?.filter((invitation) => !invitation.teamId) ?? [])
@@ -462,9 +453,9 @@ export function TeamsPage() {
                 </p>
               )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Teams List */}
       <div className="grid gap-4">

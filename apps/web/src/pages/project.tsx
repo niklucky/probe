@@ -51,6 +51,10 @@ export function ProjectPage() {
   const { data: project, isLoading: isLoadingProject } =
     trpc.projects.get.useQuery({ id }, { enabled: !!id });
 
+  const canManageAccess =
+    project?.currentUserRole === 'owner' ||
+    project?.currentUserRole === 'admin';
+
   const { data: products } = trpc.products.list.useQuery(
     { projectId: id },
     { enabled: !!id },
@@ -63,7 +67,7 @@ export function ProjectPage() {
 
   const { data: projectMembers } = trpc.projectMembers.list.useQuery(
     { projectId: id },
-    { enabled: !!id },
+    { enabled: !!id && canManageAccess },
   );
 
   const { data: testRuns } = trpc.testRuns.list.useQuery(
@@ -221,11 +225,14 @@ export function ProjectPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {(projectMembers?.length ?? 0) +
-                (teams?.reduce(
-                  (acc, team) => acc + (team.members?.length || 0),
-                  0,
-                ) ?? 0)}
+              {
+                new Set([
+                  ...(projectMembers ?? []).map((member) => member.userId),
+                  ...(teams ?? []).flatMap((team) =>
+                    (team.members ?? []).map((member) => member.userId),
+                  ),
+                ]).size
+              }
             </div>
           </CardContent>
         </Card>

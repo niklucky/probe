@@ -9,7 +9,7 @@ const actor = { id: 3, name: 'Project Owner' };
 const user = { id: 9, email: 'new@example.com' };
 
 function setup(
-  overrides: Record<string, any> = {},
+  overrides: Partial<Record<keyof InvitationRepository, any>> = {},
   options: {
     authorization?: Partial<AuthorizationService>;
     mailer?: Partial<InvitationMailer>;
@@ -87,7 +87,7 @@ function setup(
       return { id };
     },
     ...overrides,
-  } as unknown as Partial<InvitationRepository>;
+  } as Partial<InvitationRepository>;
 
   const authorization: Partial<AuthorizationService> = {
     async require() {
@@ -198,7 +198,32 @@ describe('invitation service', () => {
         { projectId: 2, email: user.email, role: 'viewer' },
         actor,
       ),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'User is already a direct member of this project',
+    });
+    expect(context.stored).toBeUndefined();
+  });
+
+  test('rejects a direct invitation for the project owner', async () => {
+    const context = setup({
+      async findProject() {
+        return { id: 2, name: 'Website', createdById: user.id };
+      },
+      async findUserByEmail() {
+        return { id: user.id };
+      },
+    });
+
+    await expect(
+      context.service.inviteProject(
+        { projectId: 2, email: user.email, role: 'viewer' },
+        actor,
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'The project owner already has access',
+    });
     expect(context.stored).toBeUndefined();
   });
 

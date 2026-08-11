@@ -21,7 +21,7 @@ export function createProjectMemberService(
 
   return {
     async list(projectId: number, actorId: number) {
-      await authorization.requireProject(actorId, projectId, 'read');
+      await authorization.requireProject(actorId, projectId, 'manage');
       return repository.list(projectId);
     },
     async updateRole(

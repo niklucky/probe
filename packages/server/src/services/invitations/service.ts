@@ -79,6 +79,42 @@ export function createInvitationService(
     return false;
   }
 
+  async function createAndSendInvitation(input: {
+    target: { teamId: number } | { projectId: number };
+    email: string;
+    role: 'admin' | 'qa' | 'manual_tester' | 'viewer';
+    actor: { id: number; name: string };
+    projectName: string;
+    teamName?: string;
+    idempotencyPrefix: 'team' | 'project';
+  }) {
+    const token = randomBytes(32).toString('base64url');
+    const invitation = await repository.createOrRefresh({
+      ...input.target,
+      email: input.email,
+      role: input.role,
+      invitedById: input.actor.id,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(Date.now() + invitationLifetimeMs),
+    });
+    const registrationUrl = new URL('/register', frontendUrl);
+    registrationUrl.searchParams.set('invitation', token);
+    await mailer.sendInvitation({
+      to: input.email,
+      teamName: input.teamName,
+      projectName: input.projectName,
+      invitedByName: input.actor.name,
+      registrationUrl: registrationUrl.toString(),
+      expiresAt: invitation.expiresAt,
+      idempotencyKey: `${input.idempotencyPrefix}-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
+    });
+    return {
+      id: invitation.id,
+      email: invitation.email,
+      expiresAt: invitation.expiresAt,
+    };
+  }
+
   return {
     async invite(
       input: {
@@ -105,31 +141,15 @@ export function createInvitationService(
         throw new AppError('CONFLICT', 'User is already a member of this team');
       }
 
-      const token = randomBytes(32).toString('base64url');
-      const invitation = await repository.createOrRefresh({
-        teamId: input.teamId,
+      return createAndSendInvitation({
+        target: { teamId: input.teamId },
         email,
         role: input.role,
-        invitedById: actor.id,
-        tokenHash: hashToken(token),
-        expiresAt: new Date(Date.now() + invitationLifetimeMs),
-      });
-      const registrationUrl = new URL('/register', frontendUrl);
-      registrationUrl.searchParams.set('invitation', token);
-      await mailer.sendInvitation({
-        to: email,
+        actor,
         teamName: team.name,
         projectName: team.project.name,
-        invitedByName: actor.name,
-        registrationUrl: registrationUrl.toString(),
-        expiresAt: invitation.expiresAt,
-        idempotencyKey: `team-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
+        idempotencyPrefix: 'team',
       });
-      return {
-        id: invitation.id,
-        email: invitation.email,
-        expiresAt: invitation.expiresAt,
-      };
     },
 
     async inviteProject(
@@ -159,30 +179,14 @@ export function createInvitationService(
         );
       }
 
-      const token = randomBytes(32).toString('base64url');
-      const invitation = await repository.createOrRefresh({
-        projectId: input.projectId,
+      return createAndSendInvitation({
+        target: { projectId: input.projectId },
         email,
         role: input.role,
-        invitedById: actor.id,
-        tokenHash: hashToken(token),
-        expiresAt: new Date(Date.now() + invitationLifetimeMs),
-      });
-      const registrationUrl = new URL('/register', frontendUrl);
-      registrationUrl.searchParams.set('invitation', token);
-      await mailer.sendInvitation({
-        to: email,
+        actor,
         projectName: project.name,
-        invitedByName: actor.name,
-        registrationUrl: registrationUrl.toString(),
-        expiresAt: invitation.expiresAt,
-        idempotencyKey: `project-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
+        idempotencyPrefix: 'project',
       });
-      return {
-        id: invitation.id,
-        email: invitation.email,
-        expiresAt: invitation.expiresAt,
-      };
     },
 
     async preview(token: string) {
