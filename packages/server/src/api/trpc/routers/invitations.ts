@@ -2,6 +2,7 @@ import {
   invitationIdInputSchema,
   invitationTokenInputSchema,
   inviteTeamMemberInputSchema,
+  inviteProjectMemberInputSchema,
   listProjectInvitationsInputSchema,
 } from '@probe/shared/schemas/invitations';
 import { protectedProcedure, publicProcedure, router } from '../../../trpc';
@@ -11,6 +12,11 @@ export const invitationsRouter = router({
     .input(inviteTeamMemberInputSchema)
     .mutation(({ ctx, input }) =>
       ctx.services.invitations.invite(input, ctx.user),
+    ),
+  inviteProject: protectedProcedure
+    .input(inviteProjectMemberInputSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.invitations.inviteProject(input, ctx.user),
     ),
   preview: publicProcedure
     .input(invitationTokenInputSchema)

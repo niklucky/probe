@@ -1,8 +1,12 @@
 # Project authorization
 
 Project ownership is derived from `projects.created_by_id`. Other project roles
-come from team membership. If a user belongs to multiple teams in the same
-project, the most permissive role applies.
+come from direct `project_members` grants and team membership. When a user has
+more than one grant, including both a direct and a team-derived role, the most
+permissive role applies deterministically: admin, QA, manual tester, then viewer.
+Direct membership can be removed without affecting team-derived access (and the
+reverse is also true). The project owner is not represented by a mutable member
+row and cannot be removed or demoted.
 
 | Role          | Read project resources | Author products, suites, cases, environments | Execute runs and attach evidence | Manage teams and project settings | Delete project |
 | ------------- | ---------------------- | -------------------------------------------- | -------------------------------- | --------------------------------- | -------------- |

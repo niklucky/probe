@@ -3,6 +3,7 @@ import {
   environments,
   files,
   products,
+  projectMembers,
   projects,
   teamMembers,
   teams,
@@ -28,6 +29,14 @@ export type ProjectResource =
   | { type: 'run'; id: number }
   | { type: 'result'; id: number }
   | { type: 'file'; id: number };
+
+const roleOrder = ['admin', 'qa', 'manual_tester', 'viewer'] as const;
+
+export function chooseHighestRole(roles: Array<(typeof roleOrder)[number]>) {
+  return [...roles].sort(
+    (a, b) => roleOrder.indexOf(a) - roleOrder.indexOf(b),
+  )[0];
+}
 
 export function createAuthorizationRepository(database: Database = db) {
   async function resolveProjectId(
@@ -134,14 +143,23 @@ export function createAuthorizationRepository(database: Database = db) {
         where: eq(projects.createdById, userId),
         columns: { id: true },
       });
-      const memberships = await database
-        .select({ projectId: teams.projectId, role: teamMembers.role })
-        .from(teamMembers)
-        .innerJoin(teams, eq(teamMembers.teamId, teams.id))
-        .where(eq(teamMembers.userId, userId));
+      const [teamMemberships, directMemberships] = await Promise.all([
+        database
+          .select({ projectId: teams.projectId, role: teamMembers.role })
+          .from(teamMembers)
+          .innerJoin(teams, eq(teamMembers.teamId, teams.id))
+          .where(eq(teamMembers.userId, userId)),
+        database
+          .select({
+            projectId: projectMembers.projectId,
+            role: projectMembers.role,
+          })
+          .from(projectMembers)
+          .where(eq(projectMembers.userId, userId)),
+      ]);
       return {
         ownedProjectIds: owned.map(({ id }) => id),
-        memberships,
+        memberships: [...directMemberships, ...teamMemberships],
       };
     },
     async getRole(userId: number, projectId: number) {
@@ -151,20 +169,27 @@ export function createAuthorizationRepository(database: Database = db) {
       });
       if (!project) return undefined;
       if (project.createdById === userId) return 'owner' as const;
-      const memberships = await database
-        .select({ role: teamMembers.role })
-        .from(teamMembers)
-        .innerJoin(teams, eq(teamMembers.teamId, teams.id))
-        .where(
-          and(eq(teamMembers.userId, userId), eq(teams.projectId, projectId)),
-        );
-      return memberships
-        .map(({ role }) => role)
-        .sort(
-          (a, b) =>
-            ['admin', 'qa', 'manual_tester', 'viewer'].indexOf(a) -
-            ['admin', 'qa', 'manual_tester', 'viewer'].indexOf(b),
-        )[0];
+      const [teamRoles, directRoles] = await Promise.all([
+        database
+          .select({ role: teamMembers.role })
+          .from(teamMembers)
+          .innerJoin(teams, eq(teamMembers.teamId, teams.id))
+          .where(
+            and(eq(teamMembers.userId, userId), eq(teams.projectId, projectId)),
+          ),
+        database
+          .select({ role: projectMembers.role })
+          .from(projectMembers)
+          .where(
+            and(
+              eq(projectMembers.userId, userId),
+              eq(projectMembers.projectId, projectId),
+            ),
+          ),
+      ]);
+      return chooseHighestRole(
+        [...directRoles, ...teamRoles].map(({ role }) => role),
+      );
     },
   };
 }

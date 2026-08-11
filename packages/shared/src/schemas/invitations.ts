@@ -17,3 +17,9 @@ export const inviteTeamMemberInputSchema = z.object({
   email: z.string().email().max(255),
   role: z.enum(['admin', 'qa', 'manual_tester', 'viewer']),
 });
+
+export const inviteProjectMemberInputSchema = z.object({
+  projectId: z.number().int().positive(),
+  email: z.string().email().max(255),
+  role: z.enum(['admin', 'qa', 'manual_tester', 'viewer']),
+});

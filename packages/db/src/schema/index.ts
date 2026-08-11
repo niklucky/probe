@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
   boolean,
+  check,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -181,6 +182,31 @@ export const projects = pgTable('projects', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// Direct project access. Team-derived roles continue to coexist with these
+// grants; authorization chooses the most permissive effective role.
+export const projectMembers = pgTable(
+  'project_members',
+  {
+    id: serial('id').primaryKey(),
+    projectId: integer('project_id')
+      .references(() => projects.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: integer('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: userRoleEnum('role').notNull().default('viewer'),
+    invitedAt: timestamp('invited_at').defaultNow().notNull(),
+    joinedAt: timestamp('joined_at'),
+  },
+  (table) => ({
+    uniqueMember: uniqueIndex('unique_project_member').on(
+      table.projectId,
+      table.userId,
+    ),
+    userIndex: index('project_members_user_index').on(table.userId),
+  }),
+);
 
 // Products table (belongs to project)
 export const products = pgTable('products', {
@@ -509,9 +535,12 @@ export const teamInvitations = pgTable(
   'team_invitations',
   {
     id: serial('id').primaryKey(),
-    teamId: integer('team_id')
-      .references(() => teams.id, { onDelete: 'cascade' })
-      .notNull(),
+    teamId: integer('team_id').references(() => teams.id, {
+      onDelete: 'cascade',
+    }),
+    projectId: integer('project_id').references(() => projects.id, {
+      onDelete: 'cascade',
+    }),
     email: varchar('email', { length: 255 }).notNull(),
     role: userRoleEnum('role').notNull().default('viewer'),
     invitedById: integer('invited_by_id')
@@ -532,6 +561,15 @@ export const teamInvitations = pgTable(
       .where(
         sql`${table.acceptedAt} is null and ${table.declinedAt} is null and ${table.cancelledAt} is null and ${table.expiredAt} is null`,
       ),
+    projectEmailUnique: uniqueIndex('team_invitations_project_email_unique')
+      .on(table.projectId, table.email)
+      .where(
+        sql`${table.projectId} is not null and ${table.acceptedAt} is null and ${table.declinedAt} is null and ${table.cancelledAt} is null and ${table.expiredAt} is null`,
+      ),
+    exactlyOneTarget: check(
+      'team_invitations_exactly_one_target',
+      sql`num_nonnulls(${table.teamId}, ${table.projectId}) = 1`,
+    ),
     tokenUnique: uniqueIndex('team_invitations_token_unique').on(
       table.tokenHash,
     ),
@@ -1143,6 +1181,7 @@ export const files = pgTable(
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),
+  projectMembers: many(projectMembers),
   teamMembers: many(teamMembers),
   testSuites: many(testSuites),
   testCases: many(testCases),
@@ -1171,9 +1210,22 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [users.id],
   }),
   products: many(products),
+  members: many(projectMembers),
+  invitations: many(teamInvitations),
   teams: many(teams),
   automationExecutionJobs: many(automationExecutionJobs),
   automationRepairSessions: many(automationRepairSessions),
+}));
+
+export const projectMembersRelations = relations(projectMembers, ({ one }) => ({
+  project: one(projects, {
+    fields: [projectMembers.projectId],
+    references: [projects.id],
+  }),
+  user: one(users, {
+    fields: [projectMembers.userId],
+    references: [users.id],
+  }),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({
@@ -1359,6 +1411,10 @@ export const teamInvitationsRelations = relations(
     team: one(teams, {
       fields: [teamInvitations.teamId],
       references: [teams.id],
+    }),
+    project: one(projects, {
+      fields: [teamInvitations.projectId],
+      references: [projects.id],
     }),
     invitedBy: one(users, {
       fields: [teamInvitations.invitedById],
