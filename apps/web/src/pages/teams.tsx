@@ -46,6 +46,12 @@ export function TeamsPage() {
   const [isAddMemberDialogOpen, setIsAddMemberDialogOpen] = useState(false);
   const [invitationEmail, setInvitationEmail] = useState('');
   const [invitationError, setInvitationError] = useState('');
+  const [isProjectInviteOpen, setIsProjectInviteOpen] = useState(false);
+  const [projectInvitationEmail, setProjectInvitationEmail] = useState('');
+  const [projectInvitationError, setProjectInvitationError] = useState('');
+  const [projectInvitationRole, setProjectInvitationRole] = useState<
+    'admin' | 'qa' | 'manual_tester' | 'viewer'
+  >('viewer');
   const [selectedRole, setSelectedRole] = useState<
     'admin' | 'qa' | 'manual_tester' | 'viewer'
   >('viewer');
@@ -61,6 +67,12 @@ export function TeamsPage() {
     { projectId: projectIdNum },
     { enabled: !!projectId },
   );
+
+  const { data: projectMembers, isLoading: isLoadingProjectMembers } =
+    trpc.projectMembers.list.useQuery(
+      { projectId: projectIdNum },
+      { enabled: !!projectId },
+    );
 
   const { data: invitations, isLoading: isLoadingInvitations } =
     trpc.invitations.listForProject.useQuery(
@@ -99,6 +111,30 @@ export function TeamsPage() {
       }),
   });
 
+  const inviteProjectMember = trpc.invitations.inviteProject.useMutation({
+    onSuccess: () => {
+      setIsProjectInviteOpen(false);
+      setProjectInvitationEmail('');
+      setProjectInvitationError('');
+      setProjectInvitationRole('viewer');
+    },
+    onError: (error) => setProjectInvitationError(error.message),
+    onSettled: () =>
+      utils.invitations.listForProject.invalidate({ projectId: projectIdNum }),
+  });
+
+  const updateProjectMemberRole = trpc.projectMembers.updateRole.useMutation({
+    onSuccess: () =>
+      utils.projectMembers.list.invalidate({ projectId: projectIdNum }),
+  });
+
+  const removeProjectMember = trpc.projectMembers.remove.useMutation({
+    onSuccess: () => {
+      utils.projectMembers.list.invalidate({ projectId: projectIdNum });
+      utils.projects.list.invalidate();
+    },
+  });
+
   const removeMember = trpc.teams.removeMember.useMutation({
     onSuccess: () => {
       utils.teams.list.invalidate({ projectId: projectIdNum });
@@ -125,6 +161,17 @@ export function TeamsPage() {
         role: selectedRole,
       });
     }
+  };
+
+  const handleProjectInvite = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!projectInvitationEmail.trim()) return;
+    setProjectInvitationError('');
+    inviteProjectMember.mutate({
+      projectId: projectIdNum,
+      email: projectInvitationEmail.trim(),
+      role: projectInvitationRole,
+    });
   };
 
   const getRoleIcon = (role: string) => {
@@ -214,9 +261,9 @@ export function TeamsPage() {
             <span>/</span>
             <span>Teams</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">Teams</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Project access</h1>
           <p className="text-muted-foreground">
-            Manage teams and their members for this project.
+            Manage direct project members and team-based access.
           </p>
         </div>
         <div className="flex gap-2">
@@ -268,6 +315,156 @@ export function TeamsPage() {
           )}
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg">Direct project members</CardTitle>
+              <CardDescription>
+                These roles apply without requiring membership in a team.
+              </CardDescription>
+            </div>
+            {canManageTeams && (
+              <Button size="sm" onClick={() => setIsProjectInviteOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Invite to project
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoadingProjectMembers ? (
+            <Skeleton className="h-16 w-full" />
+          ) : projectMembers && projectMembers.length > 0 ? (
+            <div className="space-y-2">
+              {projectMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-8 w-8">
+                      {member.user.avatarUrl && (
+                        <AvatarImage
+                          src={member.user.avatarUrl}
+                          alt={member.user.name}
+                        />
+                      )}
+                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                        {member.user.name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium">{member.user.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {member.user.email}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {canManageTeams ? (
+                      <select
+                        aria-label={`Role for ${member.user.name}`}
+                        className="rounded-md border border-input bg-background px-3 py-2 text-sm capitalize"
+                        value={member.role}
+                        onChange={(event) =>
+                          updateProjectMemberRole.mutate({
+                            projectId: projectIdNum,
+                            userId: member.userId,
+                            role: event.target.value as typeof member.role,
+                          })
+                        }
+                        disabled={updateProjectMemberRole.isPending}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="qa">QA Engineer</option>
+                        <option value="manual_tester">Manual Tester</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className={`capitalize ${getRoleColor(member.role)}`}
+                      >
+                        {member.role.replace('_', ' ')}
+                      </Badge>
+                    )}
+                    {canManageTeams && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${member.user.name}`}
+                        onClick={() =>
+                          removeProjectMember.mutate({
+                            projectId: projectIdNum,
+                            userId: member.userId,
+                          })
+                        }
+                        disabled={removeProjectMember.isPending}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No one has direct project access yet.
+            </p>
+          )}
+
+          {canManageTeams && (
+            <div className="mt-6 border-t pt-4">
+              <h3 className="mb-3 text-sm font-semibold">Direct invitations</h3>
+              {(invitations?.filter((invitation) => !invitation.teamId) ?? [])
+                .length > 0 ? (
+                <div className="space-y-2">
+                  {invitations
+                    ?.filter((invitation) => !invitation.teamId)
+                    .map((invitation) => (
+                      <div
+                        key={invitation.id}
+                        className="flex flex-col gap-2 rounded-md border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <span className="truncate">{invitation.email}</span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="capitalize">
+                            {invitation.role.replace('_', ' ')}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`capitalize ${getInvitationStatusColor(invitation.status)}`}
+                          >
+                            {invitation.status}
+                          </Badge>
+                          {invitation.status === 'pending' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() =>
+                                cancelInvitation.mutate({ id: invitation.id })
+                              }
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No direct invitations have been sent.
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Teams List */}
       <div className="grid gap-4">
@@ -489,6 +686,80 @@ export function TeamsPage() {
           )}
         </div>
       )}
+
+      <Dialog
+        open={isProjectInviteOpen}
+        onOpenChange={(open) => {
+          setIsProjectInviteOpen(open);
+          if (!open) {
+            setProjectInvitationEmail('');
+            setProjectInvitationError('');
+            inviteProjectMember.reset();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <form onSubmit={handleProjectInvite}>
+            <DialogHeader>
+              <DialogTitle>Invite directly to {project.name}</DialogTitle>
+              <DialogDescription>
+                The recipient will receive project access without joining a
+                team.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="project-invitation-email">Email</Label>
+                <Input
+                  id="project-invitation-email"
+                  type="email"
+                  value={projectInvitationEmail}
+                  onChange={(event) =>
+                    setProjectInvitationEmail(event.target.value)
+                  }
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="project-invitation-role">Role</Label>
+                <select
+                  id="project-invitation-role"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={projectInvitationRole}
+                  onChange={(event) =>
+                    setProjectInvitationRole(
+                      event.target.value as typeof projectInvitationRole,
+                    )
+                  }
+                >
+                  <option value="admin">Admin</option>
+                  <option value="qa">QA Engineer</option>
+                  <option value="manual_tester">Manual Tester</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </div>
+              {projectInvitationError && (
+                <p className="text-sm text-destructive">
+                  {projectInvitationError}
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={
+                  !projectInvitationEmail.trim() ||
+                  inviteProjectMember.isPending
+                }
+              >
+                {inviteProjectMember.isPending
+                  ? 'Sending...'
+                  : 'Send invitation'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Member Dialog */}
       <Dialog

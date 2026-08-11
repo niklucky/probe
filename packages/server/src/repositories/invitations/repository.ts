@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   isNull,
+  projectMembers,
   projects,
   sql,
   teamInvitations,
@@ -11,6 +12,8 @@ import {
   teams,
   users,
 } from '@probe/db';
+
+type InvitationInsert = typeof teamInvitations.$inferInsert;
 
 export function createInvitationRepository(database = db) {
   const pending = and(
@@ -21,37 +24,56 @@ export function createInvitationRepository(database = db) {
     sql`${teamInvitations.expiresAt} > now()`,
   );
 
+  const targetProjectId = sql<number>`coalesce(${teams.projectId}, ${teamInvitations.projectId})`;
+
   return {
-    async findTeam(id: number) {
-      return await database.query.teams.findFirst({
+    findTeam(id: number) {
+      return database.query.teams.findFirst({
         where: eq(teams.id, id),
         with: { project: true },
       });
     },
-    async findUserByEmail(email: string) {
-      return await database.query.users.findFirst({
+    findProject(id: number) {
+      return database.query.projects.findFirst({ where: eq(projects.id, id) });
+    },
+    findUserByEmail(email: string) {
+      return database.query.users.findFirst({
         where: sql`lower(${users.email}) = ${email.trim().toLowerCase()}`,
       });
     },
-    async findMember(teamId: number, userId: number) {
-      return await database.query.teamMembers.findFirst({
+    findTeamMember(teamId: number, userId: number) {
+      return database.query.teamMembers.findFirst({
         where: and(
           eq(teamMembers.teamId, teamId),
           eq(teamMembers.userId, userId),
         ),
       });
     },
-    async createOrRefresh(values: typeof teamInvitations.$inferInsert) {
+    findProjectMember(projectId: number, userId: number) {
+      return database.query.projectMembers.findFirst({
+        where: and(
+          eq(projectMembers.projectId, projectId),
+          eq(projectMembers.userId, userId),
+        ),
+      });
+    },
+    async createOrRefresh(values: InvitationInsert) {
       return database.transaction(async (transaction) => {
+        const target = values.teamId
+          ? `team:${values.teamId}`
+          : `project:${values.projectId}`;
         await transaction.execute(
-          sql`select pg_advisory_xact_lock(hashtext(${`${values.teamId}:${values.email}`}))`,
+          sql`select pg_advisory_xact_lock(hashtext(${`${target}:${values.email}`}))`,
         );
+        const targetFilter = values.teamId
+          ? eq(teamInvitations.teamId, values.teamId)
+          : eq(teamInvitations.projectId, values.projectId!);
         const [existing] = await transaction
           .select()
           .from(teamInvitations)
           .where(
             and(
-              eq(teamInvitations.teamId, values.teamId),
+              targetFilter,
               eq(teamInvitations.email, values.email),
               isNull(teamInvitations.acceptedAt),
               isNull(teamInvitations.declinedAt),
@@ -94,6 +116,7 @@ export function createInvitationRepository(database = db) {
         .select({
           id: teamInvitations.id,
           teamId: teamInvitations.teamId,
+          projectId: targetProjectId,
           email: teamInvitations.email,
           role: teamInvitations.role,
           expiresAt: teamInvitations.expiresAt,
@@ -102,45 +125,45 @@ export function createInvitationRepository(database = db) {
           cancelledAt: teamInvitations.cancelledAt,
           expiredAt: teamInvitations.expiredAt,
           teamName: teams.name,
-          projectId: projects.id,
           projectName: projects.name,
           invitedByName: users.name,
           invitedByEmail: users.email,
         })
         .from(teamInvitations)
-        .innerJoin(teams, eq(teamInvitations.teamId, teams.id))
-        .innerJoin(projects, eq(teams.projectId, projects.id))
+        .leftJoin(teams, eq(teamInvitations.teamId, teams.id))
+        .innerJoin(projects, eq(projects.id, targetProjectId))
         .innerJoin(users, eq(teamInvitations.invitedById, users.id))
         .where(eq(teamInvitations.tokenHash, tokenHash))
         .limit(1);
       return row;
     },
-    async listPending(email: string) {
+    listPending(email: string) {
       return database
         .select({
           id: teamInvitations.id,
           teamId: teamInvitations.teamId,
+          projectId: targetProjectId,
           email: teamInvitations.email,
           role: teamInvitations.role,
           expiresAt: teamInvitations.expiresAt,
           teamName: teams.name,
-          projectId: projects.id,
           projectName: projects.name,
           invitedByName: users.name,
           invitedByEmail: users.email,
         })
         .from(teamInvitations)
-        .innerJoin(teams, eq(teamInvitations.teamId, teams.id))
-        .innerJoin(projects, eq(teams.projectId, projects.id))
+        .leftJoin(teams, eq(teamInvitations.teamId, teams.id))
+        .innerJoin(projects, eq(projects.id, targetProjectId))
         .innerJoin(users, eq(teamInvitations.invitedById, users.id))
         .where(and(eq(teamInvitations.email, email), pending))
         .orderBy(teamInvitations.createdAt);
     },
     async listForProject(projectId: number) {
-      return await database
+      return database
         .select({
           id: teamInvitations.id,
           teamId: teamInvitations.teamId,
+          projectId: targetProjectId,
           teamName: teams.name,
           email: teamInvitations.email,
           recipientName: users.name,
@@ -153,13 +176,13 @@ export function createInvitationRepository(database = db) {
           createdAt: teamInvitations.createdAt,
         })
         .from(teamInvitations)
-        .innerJoin(teams, eq(teamInvitations.teamId, teams.id))
+        .leftJoin(teams, eq(teamInvitations.teamId, teams.id))
         .leftJoin(users, sql`lower(${users.email}) = ${teamInvitations.email}`)
-        .where(eq(teams.projectId, projectId))
+        .where(eq(targetProjectId, projectId))
         .orderBy(desc(teamInvitations.createdAt));
     },
-    async findById(id: number) {
-      return await database.query.teamInvitations.findFirst({
+    findById(id: number) {
+      return database.query.teamInvitations.findFirst({
         where: eq(teamInvitations.id, id),
       });
     },
@@ -176,7 +199,14 @@ export function createInvitationRepository(database = db) {
         .limit(1);
       return row;
     },
-    accept(id: number, values: typeof teamMembers.$inferInsert) {
+    accept(
+      id: number,
+      values: {
+        userId: number;
+        role: 'admin' | 'qa' | 'manual_tester' | 'viewer';
+        joinedAt: Date;
+      },
+    ) {
       return database.transaction(async (transaction) => {
         const [invitation] = await transaction
           .select()
@@ -195,12 +225,21 @@ export function createInvitationRepository(database = db) {
           return false;
         }
 
-        await transaction
-          .insert(teamMembers)
-          .values(values)
-          .onConflictDoNothing({
-            target: [teamMembers.teamId, teamMembers.userId],
-          });
+        if (invitation.teamId) {
+          await transaction
+            .insert(teamMembers)
+            .values({ ...values, teamId: invitation.teamId })
+            .onConflictDoNothing({
+              target: [teamMembers.teamId, teamMembers.userId],
+            });
+        } else {
+          await transaction
+            .insert(projectMembers)
+            .values({ ...values, projectId: invitation.projectId! })
+            .onConflictDoNothing({
+              target: [projectMembers.projectId, projectMembers.userId],
+            });
+        }
         await transaction
           .update(teamInvitations)
           .set({ acceptedAt: new Date(), updatedAt: new Date() })
@@ -254,17 +293,26 @@ export function createInvitationRepository(database = db) {
             createdAt: users.createdAt,
             updatedAt: users.updatedAt,
           });
-        await transaction
-          .insert(teamMembers)
-          .values({
-            teamId: invitation.teamId,
-            userId: user.id,
-            role: invitation.role,
-            joinedAt: new Date(),
-          })
-          .onConflictDoNothing({
-            target: [teamMembers.teamId, teamMembers.userId],
-          });
+        const membership = {
+          userId: user.id,
+          role: invitation.role,
+          joinedAt: new Date(),
+        };
+        if (invitation.teamId) {
+          await transaction
+            .insert(teamMembers)
+            .values({ ...membership, teamId: invitation.teamId })
+            .onConflictDoNothing({
+              target: [teamMembers.teamId, teamMembers.userId],
+            });
+        } else {
+          await transaction
+            .insert(projectMembers)
+            .values({ ...membership, projectId: invitation.projectId! })
+            .onConflictDoNothing({
+              target: [projectMembers.projectId, projectMembers.userId],
+            });
+        }
         await transaction
           .update(teamInvitations)
           .set({ acceptedAt: new Date(), updatedAt: new Date() })

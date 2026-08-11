@@ -39,6 +39,8 @@ import { createBrowserAuthoringService } from '../services/browser-authoring/ser
 import { createInvitationRepository } from '../repositories/invitations/repository';
 import { createInvitationService } from '../services/invitations/service';
 import { createResendInvitationMailer } from '../services/invitations/mailer';
+import { createProjectMemberRepository } from '../repositories/project-members/repository';
+import { createProjectMemberService } from '../services/project-members/service';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -131,6 +133,10 @@ export function createServices() {
       runnerDefaults,
     ),
     projects: createProjectService(createProjectRepository(), authorization),
+    projectMembers: createProjectMemberService(
+      createProjectMemberRepository(),
+      authorization,
+    ),
     products: createProductService(createProductRepository(), authorization),
     system: createSystemService(),
     teams: createTeamService(createTeamRepository(), authorization),

@@ -112,7 +112,10 @@ export function RegisterPage() {
             {invitationQuery.data && (
               <Alert>
                 <AlertDescription>
-                  You were invited to {invitationQuery.data.teamName} in{" "}
+                  You were invited to{" "}
+                  {invitationQuery.data.teamName
+                    ? `${invitationQuery.data.teamName} in `
+                    : ""}
                   {invitationQuery.data.projectName}. Creating your account will
                   accept the invitation.
                 </AlertDescription>

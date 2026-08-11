@@ -45,7 +45,8 @@ export function createInvitationService(
   async function acceptInvitation(
     invitation: {
       id: number;
-      teamId: number;
+      teamId: number | null;
+      projectId: number | null;
       email: string;
       role: 'admin' | 'qa' | 'manual_tester' | 'viewer';
     },
@@ -58,7 +59,6 @@ export function createInvitationService(
       );
     }
     const accepted = await repository.accept(invitation.id, {
-      teamId: invitation.teamId,
       userId: user.id,
       role: invitation.role,
       joinedAt: new Date(),
@@ -100,7 +100,7 @@ export function createInvitationService(
       const existingUser = await repository.findUserByEmail(email);
       if (
         existingUser &&
-        (await repository.findMember(input.teamId, existingUser.id))
+        (await repository.findTeamMember(input.teamId, existingUser.id))
       ) {
         throw new AppError('CONFLICT', 'User is already a member of this team');
       }
@@ -124,6 +124,59 @@ export function createInvitationService(
         registrationUrl: registrationUrl.toString(),
         expiresAt: invitation.expiresAt,
         idempotencyKey: `team-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
+      });
+      return {
+        id: invitation.id,
+        email: invitation.email,
+        expiresAt: invitation.expiresAt,
+      };
+    },
+
+    async inviteProject(
+      input: {
+        projectId: number;
+        email: string;
+        role: 'admin' | 'qa' | 'manual_tester' | 'viewer';
+      },
+      actor: { id: number; name: string },
+    ) {
+      await authorization.requireProject(actor.id, input.projectId, 'manage');
+      const project = await repository.findProject(input.projectId);
+      if (!project) throw new AppError('NOT_FOUND', 'Project not found');
+
+      const email = normalizeEmail(input.email);
+      const existingUser = await repository.findUserByEmail(email);
+      if (existingUser?.id === project.createdById) {
+        throw new AppError('CONFLICT', 'The project owner already has access');
+      }
+      if (
+        existingUser &&
+        (await repository.findProjectMember(input.projectId, existingUser.id))
+      ) {
+        throw new AppError(
+          'CONFLICT',
+          'User is already a direct member of this project',
+        );
+      }
+
+      const token = randomBytes(32).toString('base64url');
+      const invitation = await repository.createOrRefresh({
+        projectId: input.projectId,
+        email,
+        role: input.role,
+        invitedById: actor.id,
+        tokenHash: hashToken(token),
+        expiresAt: new Date(Date.now() + invitationLifetimeMs),
+      });
+      const registrationUrl = new URL('/register', frontendUrl);
+      registrationUrl.searchParams.set('invitation', token);
+      await mailer.sendInvitation({
+        to: email,
+        projectName: project.name,
+        invitedByName: actor.name,
+        registrationUrl: registrationUrl.toString(),
+        expiresAt: invitation.expiresAt,
+        idempotencyKey: `project-invitation-${invitation.id}-${invitation.updatedAt.getTime()}`,
       });
       return {
         id: invitation.id,
@@ -247,7 +300,9 @@ export function createInvitationService(
       }
       await authorization.require(
         actorId,
-        { type: 'team', id: invitation.teamId },
+        invitation.teamId
+          ? { type: 'team', id: invitation.teamId }
+          : { type: 'project', id: invitation.projectId! },
         'manage',
       );
       if (!(await repository.markCancelled(id))) {

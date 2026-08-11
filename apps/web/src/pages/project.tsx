@@ -61,6 +61,11 @@ export function ProjectPage() {
     { enabled: !!id },
   );
 
+  const { data: projectMembers } = trpc.projectMembers.list.useQuery(
+    { projectId: id },
+    { enabled: !!id },
+  );
+
   const { data: testRuns } = trpc.testRuns.list.useQuery(
     { projectId: id },
     { enabled: !!id },
@@ -211,15 +216,16 @@ export function ProjectPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Team Members</CardTitle>
+            <CardTitle className="text-sm font-medium">Members</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {teams?.reduce(
-                (acc, team) => acc + (team.members?.length || 0),
-                0,
-              ) || 0}
+              {(projectMembers?.length ?? 0) +
+                (teams?.reduce(
+                  (acc, team) => acc + (team.members?.length || 0),
+                  0,
+                ) ?? 0)}
             </div>
           </CardContent>
         </Card>
@@ -409,7 +415,7 @@ export function ProjectPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="products">Products</TabsTrigger>
-          <TabsTrigger value="teams">Teams</TabsTrigger>
+          <TabsTrigger value="teams">Access</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -457,9 +463,15 @@ export function ProjectPage() {
                   <Plus className="mr-2 h-4 w-4" />
                   Add Product
                 </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Users className="mr-2 h-4 w-4" />
-                  Invite Team Member
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  asChild
+                >
+                  <Link to={`/projects/${projectId}/teams`}>
+                    <Users className="mr-2 h-4 w-4" />
+                    Manage project access
+                  </Link>
                 </Button>
               </CardContent>
             </Card>
@@ -568,11 +580,11 @@ export function ProjectPage() {
 
         <TabsContent value="teams" className="space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium">Teams</h3>
+            <h3 className="text-lg font-medium">Project access</h3>
             <Button size="sm" asChild>
               <Link to={`/projects/${projectId}/teams`}>
                 <Settings className="mr-2 h-4 w-4" />
-                Manage Teams
+                Manage Access
               </Link>
             </Button>
           </div>

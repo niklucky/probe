@@ -2,7 +2,7 @@ import { InternalServerError } from '@probe/shared/errors/app-error';
 
 export interface InvitationEmail {
   to: string;
-  teamName: string;
+  teamName?: string | null;
   projectName: string;
   invitedByName: string;
   registrationUrl: string;
@@ -54,9 +54,13 @@ export function createResendInvitationMailer(config: {
           body: JSON.stringify({
             from: config.from,
             to: [email.to],
-            subject: `Join ${email.teamName} on Probe`,
-            html: `<p>${escapeHtml(email.invitedByName)} invited you to join <strong>${escapeHtml(email.teamName)}</strong> in ${escapeHtml(email.projectName)}.</p><p><a href="${escapeHtml(email.registrationUrl)}">View and accept invitation</a></p><p>This invitation expires at ${escapeHtml(expiresAt)}.</p>`,
-            text: `${email.invitedByName} invited you to join ${email.teamName} in ${email.projectName}.\n\nView and accept: ${email.registrationUrl}\n\nThis invitation expires at ${expiresAt}.`,
+            subject: `Join ${email.teamName ?? email.projectName} on Probe`,
+            html: email.teamName
+              ? `<p>${escapeHtml(email.invitedByName)} invited you to join <strong>${escapeHtml(email.teamName)}</strong> in ${escapeHtml(email.projectName)}.</p><p><a href="${escapeHtml(email.registrationUrl)}">View and accept invitation</a></p><p>This invitation expires at ${escapeHtml(expiresAt)}.</p>`
+              : `<p>${escapeHtml(email.invitedByName)} invited you to join <strong>${escapeHtml(email.projectName)}</strong>.</p><p><a href="${escapeHtml(email.registrationUrl)}">View and accept invitation</a></p><p>This invitation expires at ${escapeHtml(expiresAt)}.</p>`,
+            text: email.teamName
+              ? `${email.invitedByName} invited you to join ${email.teamName} in ${email.projectName}.\n\nView and accept: ${email.registrationUrl}\n\nThis invitation expires at ${expiresAt}.`
+              : `${email.invitedByName} invited you to join ${email.projectName}.\n\nView and accept: ${email.registrationUrl}\n\nThis invitation expires at ${expiresAt}.`,
           }),
         });
       } catch (error) {

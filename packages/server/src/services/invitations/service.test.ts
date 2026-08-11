@@ -9,7 +9,7 @@ const actor = { id: 3, name: 'Project Owner' };
 const user = { id: 9, email: 'new@example.com' };
 
 function setup(
-  overrides: Partial<InvitationRepository> = {},
+  overrides: Record<string, any> = {},
   options: {
     authorization?: Partial<AuthorizationService>;
     mailer?: Partial<InvitationMailer>;
@@ -30,13 +30,19 @@ function setup(
         project: { id: 2, name: 'Website' },
       };
     },
+    async findProject() {
+      return { id: 2, name: 'Website', createdById: actor.id };
+    },
     async findUserByEmail() {
       return undefined;
     },
-    async findMember() {
+    async findTeamMember() {
       return undefined;
     },
-    async createOrRefresh(values) {
+    async findProjectMember() {
+      return undefined;
+    },
+    async createOrRefresh(values: any) {
       stored = values;
       return {
         id: 12,
@@ -64,7 +70,7 @@ function setup(
     async findByIdForEmail() {
       return undefined;
     },
-    async accept(id, values) {
+    async accept(id: number, values: any) {
       memberAdded = values;
       acceptedId = id;
       return true;
@@ -81,7 +87,7 @@ function setup(
       return { id };
     },
     ...overrides,
-  } as Partial<InvitationRepository>;
+  } as unknown as Partial<InvitationRepository>;
 
   const authorization: Partial<AuthorizationService> = {
     async require() {
@@ -149,7 +155,7 @@ describe('invitation service', () => {
       async findUserByEmail() {
         return { id: 9 } as any;
       },
-      async findMember() {
+      async findTeamMember() {
         return { id: 1 } as any;
       },
     });
@@ -161,7 +167,42 @@ describe('invitation service', () => {
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
-  test('accepts a pending invitation and adds project-granting team membership', async () => {
+  test('creates a direct project invitation without requiring a team', async () => {
+    const context = setup();
+    await context.service.inviteProject(
+      { projectId: 2, email: ' NEW@Example.com ', role: 'manual_tester' },
+      actor,
+    );
+
+    expect(context.stored).toMatchObject({
+      projectId: 2,
+      email: 'new@example.com',
+      role: 'manual_tester',
+    });
+    expect(context.stored?.teamId).toBeUndefined();
+    expect(context.sent?.projectName).toBe('Website');
+    expect(context.sent?.teamName).toBeUndefined();
+  });
+
+  test('rejects a duplicate direct project membership', async () => {
+    const context = setup({
+      async findUserByEmail() {
+        return { id: user.id };
+      },
+      async findProjectMember() {
+        return { id: 4 };
+      },
+    });
+    await expect(
+      context.service.inviteProject(
+        { projectId: 2, email: user.email, role: 'viewer' },
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(context.stored).toBeUndefined();
+  });
+
+  test('accepts a pending invitation and passes membership details to the repository', async () => {
     const invitation = {
       id: 12,
       teamId: 4,
@@ -185,7 +226,6 @@ describe('invitation service', () => {
 
     await context.service.acceptById(invitation.id, user);
     expect(context.memberAdded).toMatchObject({
-      teamId: 4,
       userId: 9,
       role: 'qa',
     });

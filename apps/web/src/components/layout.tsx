@@ -133,7 +133,11 @@ export function Layout() {
                   <span>
                     <strong>{invitation.invitedByName}</strong> (
                     {invitation.invitedByEmail}) invited you to{' '}
-                    <strong>{invitation.teamName}</strong> in{' '}
+                    {invitation.teamName ? (
+                      <>
+                        <strong>{invitation.teamName}</strong> in{' '}
+                      </>
+                    ) : null}
                     <strong>{invitation.projectName}</strong> as{' '}
                     {invitation.role.replace('_', ' ')}.
                   </span>
