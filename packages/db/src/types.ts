@@ -10,6 +10,7 @@ import type {
   products,
   projects,
   teamMembers,
+  teamInvitations,
   teams,
   testCases,
   testCaseVersions,
@@ -47,6 +48,8 @@ export type Team = typeof teams.$inferSelect;
 export type CreateTeam = typeof teams.$inferInsert;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type CreateTeamMember = typeof teamMembers.$inferInsert;
+export type TeamInvitation = typeof teamInvitations.$inferSelect;
+export type CreateTeamInvitation = typeof teamInvitations.$inferInsert;
 export type TestSuite = typeof testSuites.$inferSelect;
 export type CreateTestSuite = typeof testSuites.$inferInsert;
 export type TestSuiteVersion = typeof testSuiteVersions.$inferSelect;

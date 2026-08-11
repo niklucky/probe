@@ -1,4 +1,4 @@
-import { db, eq, like, users } from '@probe/db';
+import { db, eq, like, sql, users } from '@probe/db';
 
 const publicColumns = {
   id: true,
@@ -33,7 +33,9 @@ export function createUserRepository(database = db) {
       });
     },
     findByEmail(email: string) {
-      return database.query.users.findFirst({ where: eq(users.email, email) });
+      return database.query.users.findFirst({
+        where: sql`lower(${users.email}) = ${email.trim().toLowerCase()}`,
+      });
     },
     async create(values: typeof users.$inferInsert) {
       const [user] = await database

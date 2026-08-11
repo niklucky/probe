@@ -19,14 +19,15 @@ const t = initTRPC.context<Context>().create({
 });
 
 const withAppErrorMapping = t.middleware(async ({ next }) => {
-  try {
-    return await next();
-  } catch (error) {
-    if (error instanceof AppError) {
-      throw new TRPCError({ code: error.code, message: error.message });
-    }
-    throw error;
+  const result = await next();
+  if (!result.ok && result.error.cause instanceof AppError) {
+    throw new TRPCError({
+      code: result.error.cause.code,
+      message: result.error.cause.message,
+      cause: result.error.cause,
+    });
   }
+  return result;
 });
 
 export const router = t.router;

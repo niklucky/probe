@@ -9,5 +9,6 @@ export * from './schemas/test-automations';
 export * from './schemas/automation-executions';
 export * from './schemas/automation-repairs';
 export * from './schemas/browser-authoring';
+export * from './schemas/invitations';
 export * from './browser-authoring';
 export * from './automation-environment';

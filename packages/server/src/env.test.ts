@@ -59,5 +59,8 @@ describe('server environment', () => {
     expect(() =>
       parseServerEnv({ MINIO_PUBLIC_URL: 'ftp://storage.example.test' }),
     ).toThrow('MINIO_PUBLIC_URL');
+    expect(() => parseServerEnv({ NODE_ENV: 'production' })).toThrow(
+      'INVITATION_FROM_EMAIL',
+    );
   });
 });

@@ -36,6 +36,9 @@ import { createAutomationRepairRepository } from '../repositories/automation-rep
 import { createAutomationRepairService } from '../services/automation-repairs/service';
 import { createBrowserAuthoringRepository } from '../repositories/browser-authoring/repository';
 import { createBrowserAuthoringService } from '../services/browser-authoring/service';
+import { createInvitationRepository } from '../repositories/invitations/repository';
+import { createInvitationService } from '../services/invitations/service';
+import { createResendInvitationMailer } from '../services/invitations/mailer';
 
 export function createServices() {
   const userRepository = createUserRepository();
@@ -72,8 +75,18 @@ export function createServices() {
     networkPolicy: serverEnv.RUNNER_NETWORK_POLICY,
   };
   const testAutomationRepository = createTestAutomationRepository();
+  const invitations = createInvitationService(
+    createInvitationRepository(),
+    authorization,
+    createResendInvitationMailer({
+      apiKey: serverEnv.RESEND_API_KEY,
+      from: serverEnv.INVITATION_FROM_EMAIL,
+    }),
+    serverEnv.FRONTEND_URL,
+  );
   return {
-    auth: createAuthService(userRepository),
+    auth: createAuthService(userRepository, invitations),
+    invitations,
     files: createFileService(
       createFileRepository(),
       storage,
