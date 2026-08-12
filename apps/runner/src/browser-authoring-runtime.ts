@@ -30,6 +30,9 @@ const toolTimeoutMs = Number(process.env.TOOL_TIMEOUT_MS || 30000);
 selectors.setTestIdAttribute(testIdAttribute);
 const cookies = JSON.parse(process.env.PROBE_ENVIRONMENT_COOKIES || '[]');
 const headers = JSON.parse(process.env.PROBE_ENVIRONMENT_HEADERS || '[]');
+const storageState = process.env.PROBE_STORAGE_STATE
+  ? JSON.parse(process.env.PROBE_STORAGE_STATE)
+  : undefined;
 const secretNames = JSON.parse(process.env.PROBE_SECRET_NAMES || '[]');
 const secretValues = [
   ...secretNames.map((name) => process.env[name]).filter(Boolean),
@@ -37,7 +40,7 @@ const secretValues = [
   ...headers.map((header) => header.value).filter(Boolean),
 ].sort((left, right) => right.length - left.length);
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext();
+const context = await browser.newContext(storageState ? { storageState } : {});
 if (cookies.length) await context.addCookies(cookies);
 await context.route('**/*', async (route) => {
   const request = route.request();
@@ -227,6 +230,8 @@ export function buildAuthoringDockerArgs(
     args.push('--env', 'PROBE_ENVIRONMENT_COOKIES');
   if (runtimeEnvironment.headers.length)
     args.push('--env', 'PROBE_ENVIRONMENT_HEADERS');
+  if (runtimeEnvironment.storageState)
+    args.push('--env', 'PROBE_STORAGE_STATE');
   if (
     runtimeEnvironment.secretNames.length ||
     runtimeEnvironment.cookies.length ||
@@ -276,6 +281,13 @@ export async function startAuthoringBrowser(
         ? {
             PROBE_ENVIRONMENT_HEADERS: JSON.stringify(
               runtimeEnvironment.headers,
+            ),
+          }
+        : {}),
+      ...(runtimeEnvironment.storageState
+        ? {
+            PROBE_STORAGE_STATE: JSON.stringify(
+              runtimeEnvironment.storageState,
             ),
           }
         : {}),

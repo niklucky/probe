@@ -73,6 +73,10 @@ export function AiTestCaseDialog({
   const [instruction, setInstruction] = useState('');
   const [connectionId, setConnectionId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
+  const [environmentProfileId, setEnvironmentProfileId] = useState('');
+  const [startingState, setStartingState] = useState<
+    'profile_authentication' | 'signed_out'
+  >('profile_authentication');
   const [proposal, setProposal] = useState<TestSpec | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -85,12 +89,17 @@ export function AiTestCaseDialog({
     { productId },
     { enabled: open },
   );
+  const { data: profiles = [] } = trpc.environments.listProfiles.useQuery(
+    { environmentId: Number(environmentId) || 0 },
+    { enabled: open && Boolean(environmentId) },
+  );
 
   useEffect(() => {
     if (!open) {
       setDescription('');
       setInstruction('');
       setEnvironmentId('');
+      setEnvironmentProfileId('');
       setProposal(null);
       setJobId(null);
       setError('');
@@ -136,6 +145,10 @@ export function AiTestCaseDialog({
       description: mode === 'generate' ? description : undefined,
       instruction: mode === 'improve' ? instruction || undefined : undefined,
       environmentId: environmentId ? Number(environmentId) : undefined,
+      environmentProfileId: environmentId
+        ? Number(environmentProfileId)
+        : undefined,
+      startingState: environmentId ? startingState : undefined,
       connectionId: selectedConnection,
     });
   };
@@ -198,7 +211,10 @@ export function AiTestCaseDialog({
               id="ai-environment"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
               value={environmentId}
-              onChange={(event) => setEnvironmentId(event.target.value)}
+              onChange={(event) => {
+                setEnvironmentId(event.target.value);
+                setEnvironmentProfileId('');
+              }}
             >
               <option value="">No environment context</option>
               {environments.map((environment) => (
@@ -209,6 +225,61 @@ export function AiTestCaseDialog({
               ))}
             </select>
           </div>
+          {environmentId && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="ai-test-profile">Test profile</Label>
+                <select
+                  id="ai-test-profile"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                  value={environmentProfileId}
+                  onChange={(event) =>
+                    setEnvironmentProfileId(event.target.value)
+                  }
+                >
+                  <option value="">Choose a test profile</option>
+                  {profiles.map((profile) => (
+                    <option
+                      key={profile.id}
+                      value={profile.id}
+                      disabled={
+                        !profile.enabled ||
+                        (startingState === 'profile_authentication' &&
+                          !profile.isAnonymous &&
+                          profile.authenticationStatus !== 'ready')
+                      }
+                    >
+                      {profile.name}
+                      {profile.isAnonymous ? ' (Guest)' : ''}
+                      {profile.authenticationStatus !== 'ready'
+                        ? ` (${profile.authenticationStatus.replace(/_/g, ' ')})`
+                        : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ai-starting-state">Starting state</Label>
+                <select
+                  id="ai-starting-state"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                  value={startingState}
+                  onChange={(event) => {
+                    setStartingState(
+                      event.target.value as
+                        'profile_authentication' | 'signed_out',
+                    );
+                    setEnvironmentProfileId('');
+                  }}
+                >
+                  <option value="profile_authentication">
+                    Use profile authentication
+                  </option>
+                  <option value="signed_out">Start signed out</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           {mode === 'generate' ? (
             <div className="grid gap-2">
@@ -248,7 +319,11 @@ export function AiTestCaseDialog({
             <Button
               type="button"
               onClick={generate}
-              disabled={busy || (mode === 'generate' && !description.trim())}
+              disabled={
+                busy ||
+                (mode === 'generate' && !description.trim()) ||
+                (Boolean(environmentId) && !environmentProfileId)
+              }
             >
               <Sparkles className="mr-2 h-4 w-4" />
               {requestProposal.isPending

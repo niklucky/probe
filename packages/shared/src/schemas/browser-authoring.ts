@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { aiConnectionReferenceSchema } from './ai-authoring';
+import { testStartingStateSchema } from './environments';
 
 export const browserAuthoringStatusSchema = z.enum([
   'queued',
@@ -97,6 +98,7 @@ export const startBrowserAuthoringInputSchema = z.object({
   sourceTestCaseVersionId: z.number().int().positive(),
   environmentId: z.number().int().positive(),
   environmentProfileId: z.number().int().positive(),
+  startingState: testStartingStateSchema.optional(),
   connectionId: aiConnectionReferenceSchema.optional(),
 });
 
@@ -118,6 +120,7 @@ export const browserAuthoringSessionSchema = z.object({
   environmentProfileId: z.number().int().positive(),
   environmentProfileName: z.string(),
   environmentProfileRevision: z.number().int().positive(),
+  startingState: testStartingStateSchema,
   status: browserAuthoringStatusSchema,
   phase: browserAuthoringPhaseSchema,
   toolCallCount: z.number().int().nonnegative(),

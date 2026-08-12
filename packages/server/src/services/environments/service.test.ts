@@ -660,7 +660,7 @@ describe('environment header service', () => {
 });
 
 describe('environment profile service', () => {
-  test('creates a binding-free Anonymous profile with every environment', async () => {
+  test('creates a binding-free Guest profile with every environment', async () => {
     const { service, profiles } = fixture();
     await service.create(
       {
@@ -675,7 +675,9 @@ describe('environment profile service', () => {
     );
     expect(profiles).toHaveLength(1);
     expect(profiles[0]).toMatchObject({
-      name: 'Anonymous',
+      name: 'Guest',
+      description: 'Unauthenticated browser with no saved session',
+      authenticationStatus: 'ready',
       isAnonymous: true,
       variables: [],
       cookies: [],
@@ -714,7 +716,7 @@ describe('environment profile service', () => {
     expect(JSON.stringify(profiles)).not.toContain('qa-user');
 
     await service.updateVariable({ id: variable.id, value: 'new-user' }, 3);
-    const updated = await service.getEnabledProfile(profile.id, 7, 3);
+    const updated = await service.getProfile(profile.id, 3);
     expect(updated.revision).toBe(2);
   });
 

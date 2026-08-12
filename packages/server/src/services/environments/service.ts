@@ -9,6 +9,8 @@ import type {
   CreateEnvironmentHeaderInput,
   CreateEnvironmentVariableInput,
   CreateEnvironmentProfileInput,
+  CaptureEnvironmentProfileSessionInput,
+  ProfileAuthentication,
   UpdateEnvironmentInput,
   UpdateEnvironmentCookieInput,
   UpdateEnvironmentHeaderInput,
@@ -130,12 +132,36 @@ export function createEnvironmentService(
 
   function publicProfile<
     T extends {
+      id: number;
+      environmentId: number;
+      encryptedAuthentication?: string | null;
       variables?: Array<{ variableId: number }>;
       cookies?: Array<{ cookieId: number }>;
       headers?: Array<{ headerId: number }>;
     },
   >(profile: T) {
-    const { variables = [], cookies = [], headers = [], ...safe } = profile;
+    const {
+      variables = [],
+      cookies = [],
+      headers = [],
+      encryptedAuthentication,
+      ...safe
+    } = profile;
+    let authentication: ProfileAuthentication | undefined;
+    if (encryptedAuthentication) {
+      try {
+        authentication = JSON.parse(
+          cipher.decrypt(
+            encryptedAuthentication,
+            profile.environmentId,
+            `test-profile:${profile.id}:authentication`,
+          ),
+        ) as ProfileAuthentication;
+      } catch {
+        // Reads fail closed and expose metadata only. Runtime performs its own
+        // authenticated decryption before a profile can be used.
+      }
+    }
     return {
       ...safe,
       variableIds: variables
@@ -147,7 +173,54 @@ export function createEnvironmentService(
       headerIds: headers
         .map(({ headerId }) => headerId)
         .sort((left, right) => left - right),
+      hasStorageState: Boolean(authentication?.storageState),
+      hasCredentials: Boolean(authentication?.credentials),
+      advancedCookieCount: authentication?.cookies?.length ?? 0,
+      advancedHeaderCount: authentication?.headers?.length ?? 0,
     };
+  }
+
+  function encryptProfileAuthentication(
+    authentication: ProfileAuthentication,
+    environmentId: number,
+    profileId: number,
+  ) {
+    return cipher.encrypt(
+      JSON.stringify(authentication),
+      environmentId,
+      `test-profile:${profileId}:authentication`,
+    );
+  }
+
+  async function validateAuthentication(
+    environmentId: number,
+    mode: 'basic' | 'advanced',
+    authentication: ProfileAuthentication,
+  ) {
+    const environment = await repository.find(environmentId);
+    if (!environment) throw new AppError('NOT_FOUND', 'Environment not found');
+    if (
+      mode === 'basic' &&
+      (authentication.cookies.length || authentication.headers.length)
+    ) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Direct cookies and headers require Advanced mode',
+      );
+    }
+    for (const cookie of authentication.cookies) {
+      validateEnvironmentCookieDomain(cookie.domain, environment.baseUrl);
+    }
+    const baseOrigin = new URL(environment.baseUrl).origin;
+    for (const header of authentication.headers) {
+      if (header.origin !== baseOrigin) {
+        throw new AppError(
+          'BAD_REQUEST',
+          `Profile headers must use the exact environment origin ${baseOrigin}`,
+        );
+      }
+    }
+    return authentication;
   }
 
   function uniqueIds(ids: number[]) {
@@ -292,7 +365,10 @@ export function createEnvironmentService(
         await transactionRepository.createProfile(
           {
             environmentId: environment!.id,
-            name: 'Anonymous',
+            name: 'Guest',
+            description: 'Unauthenticated browser with no saved session',
+            mode: 'basic',
+            authenticationStatus: 'ready',
             isAnonymous: true,
             enabled: true,
             createdById: userId,
@@ -323,7 +399,13 @@ export function createEnvironmentService(
       return publicProfile(profile);
     },
 
-    async getEnabledProfile(id: number, environmentId: number, userId: number) {
+    async getEnabledProfile(
+      id: number,
+      environmentId: number,
+      userId: number,
+      startingState:
+        'profile_authentication' | 'signed_out' = 'profile_authentication',
+    ) {
       const profile = await repository.findProfile(id);
       if (!profile || profile.environmentId !== environmentId) {
         throw new AppError('NOT_FOUND', 'Profile not found');
@@ -334,7 +416,18 @@ export function createEnvironmentService(
         'read',
       );
       if (!profile.enabled) {
-        throw new ConflictError('Environment profile is disabled');
+        throw new ConflictError('Test profile is disabled');
+      }
+      if (
+        startingState === 'profile_authentication' &&
+        !profile.isAnonymous &&
+        profile.authenticationStatus !== 'ready'
+      ) {
+        throw new ConflictError(
+          profile.authenticationStatus === 'expired'
+            ? `${profile.name} authentication has expired. Refresh the test profile before running this test.`
+            : `${profile.name} authentication needs verification before it can be used.`,
+        );
       }
       return publicProfile(profile);
     },
@@ -376,20 +469,40 @@ export function createEnvironmentService(
         cookieIds: input.cookieIds,
         headerIds: input.headerIds,
       });
+      const authentication = input.authentication
+        ? await validateAuthentication(
+            input.environmentId,
+            input.mode ?? 'basic',
+            input.authentication,
+          )
+        : undefined;
       return mapProfileConflict(() =>
         repository.withTransaction(async (transactionRepository) => {
           const profile = await transactionRepository.createProfile(
             {
               environmentId: input.environmentId,
               name: input.name,
+              description: input.description ?? null,
+              mode: input.mode ?? 'basic',
+              authenticationStatus: 'needs_verification',
               isAnonymous: false,
               enabled: input.enabled,
               createdById: userId,
             },
             bindings,
           );
+          const storedProfile = authentication
+            ? await transactionRepository.updateProfile(profile.id, {
+                encryptedAuthentication: encryptProfileAuthentication(
+                  authentication,
+                  input.environmentId,
+                  profile.id,
+                ),
+                capturedAt: authentication.storageState ? new Date() : null,
+              })
+            : profile;
           return publicProfile({
-            ...profile,
+            ...storedProfile!,
             variables: bindings.variableIds.map((variableId) => ({
               variableId,
             })),
@@ -411,12 +524,15 @@ export function createEnvironmentService(
       if (
         current.isAnonymous &&
         (input.name !== undefined ||
+          input.description !== undefined ||
+          input.mode !== undefined ||
+          input.authentication !== undefined ||
           input.cookieIds !== undefined ||
           input.headerIds !== undefined)
       ) {
         throw new AppError(
           'BAD_REQUEST',
-          'The Anonymous profile cannot be renamed or given cookies or headers',
+          'The Guest profile cannot be renamed or given authentication material',
         );
       }
       const hasBindingUpdate =
@@ -452,11 +568,42 @@ export function createEnvironmentService(
           ))
           ? validatedBindings
           : undefined;
-      const { id, name, variableIds, cookieIds, headerIds, ...otherUpdates } =
-        input;
+      const {
+        id,
+        name,
+        variableIds,
+        cookieIds,
+        headerIds,
+        authentication,
+        ...otherUpdates
+      } = input;
+      const nextMode = input.mode ?? current.mode;
+      const validatedAuthentication =
+        authentication &&
+        (await validateAuthentication(
+          current.environmentId,
+          nextMode,
+          authentication,
+        ));
       const updates = {
         ...otherUpdates,
         ...(name !== undefined && name !== current.name ? { name } : {}),
+        ...(authentication !== undefined
+          ? {
+              encryptedAuthentication: validatedAuthentication
+                ? encryptProfileAuthentication(
+                    validatedAuthentication,
+                    current.environmentId,
+                    current.id,
+                  )
+                : null,
+              authenticationStatus: 'needs_verification' as const,
+              capturedAt: validatedAuthentication?.storageState
+                ? new Date()
+                : null,
+              verifiedAt: null,
+            }
+          : {}),
       };
       return mapProfileConflict(() =>
         repository.withTransaction(async (transactionRepository) => {
@@ -485,6 +632,53 @@ export function createEnvironmentService(
       );
     },
 
+    async captureProfileSession(
+      input: CaptureEnvironmentProfileSessionInput,
+      userId: number,
+    ) {
+      const current = await repository.findProfile(input.id);
+      if (!current) throw new AppError('NOT_FOUND', 'Test profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: current.environmentId },
+        'author',
+      );
+      if (current.isAnonymous) {
+        throw new ConflictError('Guest does not accept authentication state');
+      }
+      let existing: ProfileAuthentication = { cookies: [], headers: [] };
+      if (current.encryptedAuthentication) {
+        existing = JSON.parse(
+          cipher.decrypt(
+            current.encryptedAuthentication,
+            current.environmentId,
+            `test-profile:${current.id}:authentication`,
+          ),
+        ) as ProfileAuthentication;
+      }
+      const authentication = await validateAuthentication(
+        current.environmentId,
+        current.mode,
+        { ...existing, storageState: input.storageState },
+      );
+      const profile = await repository.updateProfile(current.id, {
+        encryptedAuthentication: encryptProfileAuthentication(
+          authentication,
+          current.environmentId,
+          current.id,
+        ),
+        authenticationStatus: 'needs_verification',
+        capturedAt: new Date(),
+        verifiedAt: null,
+      });
+      return publicProfile({
+        ...profile!,
+        variables: current.variables,
+        cookies: current.cookies,
+        headers: current.headers,
+      });
+    },
+
     async deleteProfile(id: number, userId: number) {
       const profile = await repository.findProfile(id);
       if (!profile) throw new AppError('NOT_FOUND', 'Profile not found');
@@ -494,7 +688,7 @@ export function createEnvironmentService(
         'author',
       );
       if (profile.isAnonymous) {
-        throw new ConflictError('The Anonymous profile cannot be deleted');
+        throw new ConflictError('The Guest profile cannot be deleted');
       }
       try {
         if (!(await repository.deleteProfile(id))) {

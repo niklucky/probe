@@ -130,6 +130,11 @@ export function createTestCaseService(
           priority: input.priority,
           status: input.status,
           tags: input.tags,
+          environmentId: input.environmentId ?? null,
+          environmentProfileId: input.environmentProfileId ?? null,
+          environmentProfileName: input.environmentProfileName ?? null,
+          environmentProfileRevision: input.environmentProfileRevision ?? null,
+          startingState: input.startingState ?? null,
           createdById: userId,
         });
         const updated = await transactionRepository.setCurrentVersion(
@@ -193,6 +198,26 @@ export function createTestCaseService(
           priority: input.priority ?? latest?.priority ?? 'medium',
           status: input.status ?? latest?.status ?? 'draft',
           tags: input.tags ?? latest?.tags ?? [],
+          environmentId:
+            input.environmentId !== undefined
+              ? input.environmentId
+              : latest?.environmentId,
+          environmentProfileId:
+            input.environmentProfileId !== undefined
+              ? input.environmentProfileId
+              : latest?.environmentProfileId,
+          environmentProfileName:
+            input.environmentProfileName !== undefined
+              ? input.environmentProfileName
+              : latest?.environmentProfileName,
+          environmentProfileRevision:
+            input.environmentProfileRevision !== undefined
+              ? input.environmentProfileRevision
+              : latest?.environmentProfileRevision,
+          startingState:
+            input.startingState !== undefined
+              ? input.startingState
+              : latest?.startingState,
           createdById: userId,
         });
         const updated = await transactionRepository.setCurrentVersion(

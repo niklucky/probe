@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { createCipheriv } from 'node:crypto';
 import {
   cookieVariableReferences,
+  decryptProfileAuthentication,
   headerVariableReferences,
   resolveRuntimeCookies,
   resolveRuntimeEnvironment,
   resolveRuntimeHeaders,
   RuntimeEnvironmentError,
   runtimeSensitiveVariableNames,
+  runtimeProfileAuthentication,
 } from './environment-variables';
 
 const key = '11'.repeat(32);
@@ -109,6 +111,87 @@ describe('execution environment variables', () => {
     );
     expect(first.values.username).toBe('first');
     expect(second.values.username).toBe('second');
+  });
+});
+
+describe('test profile authentication', () => {
+  test('decrypts environment/profile-bound state and scopes local storage and headers', () => {
+    const profileId = 19;
+    const payload = {
+      storageState: {
+        cookies: [],
+        origins: [
+          {
+            origin: 'https://app.example.test',
+            localStorage: [{ name: 'session', value: 'secret-state' }],
+          },
+          {
+            origin: 'https://other.example.test',
+            localStorage: [{ name: 'other', value: 'must-not-be-injected' }],
+          },
+        ],
+      },
+      cookies: [],
+      headers: [
+        {
+          name: 'X-Test-Auth',
+          value: 'secret-header',
+          origin: 'https://app.example.test',
+        },
+      ],
+    };
+    const encrypted = encrypt(
+      JSON.stringify(payload),
+      7,
+      `test-profile:${profileId}:authentication`,
+    );
+    const decrypted = decryptProfileAuthentication(
+      encrypted,
+      7,
+      profileId,
+      key,
+    );
+    const runtime = runtimeProfileAuthentication(
+      decrypted,
+      'https://app.example.test/dashboard',
+    );
+
+    expect(runtime.storageState?.origins).toHaveLength(1);
+    expect(runtime.storageState?.origins[0]?.origin).toBe(
+      'https://app.example.test',
+    );
+    expect(runtime.headers).toEqual(payload.headers);
+    expect(() =>
+      decryptProfileAuthentication(encrypted, 7, profileId + 1, key),
+    ).toThrow(RuntimeEnvironmentError);
+  });
+
+  test('fails closed when profile browser state has expired', () => {
+    expect(() =>
+      runtimeProfileAuthentication(
+        {
+          storageState: {
+            cookies: [
+              {
+                name: 'session',
+                value: 'expired-secret',
+                domain: 'app.example.test',
+                path: '/',
+                expires: 100,
+                httpOnly: true,
+                secure: true,
+                sameSite: 'Lax',
+              },
+            ],
+            origins: [],
+          },
+          cookies: [],
+          headers: [],
+        },
+        'https://app.example.test',
+        101,
+      ),
+    ).toThrow('Refresh the test profile');
   });
 });
 

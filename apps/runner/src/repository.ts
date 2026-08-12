@@ -29,14 +29,24 @@ export function isCurrentEnvironmentProfileSnapshot(
   snapshot: {
     environmentId: number;
     environmentProfileRevision: number | null;
+    startingState?: 'profile_authentication' | 'signed_out';
   },
   profile:
-    | { environmentId: number; revision: number; enabled: boolean }
+    | {
+        environmentId: number;
+        revision: number;
+        enabled: boolean;
+        isAnonymous?: boolean;
+        authenticationStatus?: 'ready' | 'needs_verification' | 'expired';
+      }
     | null
     | undefined,
 ) {
   return Boolean(
     profile?.enabled &&
+    (snapshot.startingState !== 'profile_authentication' ||
+      profile.isAnonymous ||
+      profile.authenticationStatus === 'ready') &&
     profile.environmentId === snapshot.environmentId &&
     profile.revision === snapshot.environmentProfileRevision,
   );
@@ -69,10 +79,13 @@ export function isRunnableExecutionSnapshot(payload: {
   environmentId: number;
   environmentProfileId: number | null;
   environmentProfileRevision: number | null;
+  startingState?: 'profile_authentication' | 'signed_out';
   environmentProfile?: {
     environmentId: number;
     revision: number;
     enabled: boolean;
+    isAnonymous?: boolean;
+    authenticationStatus?: 'ready' | 'needs_verification' | 'expired';
   } | null;
   automation: { id: number; environmentId: number; status: string };
   repairAttempts?: Array<{
@@ -567,6 +580,8 @@ export function createRunnerRepository(database: Database = db) {
           environmentId: true,
           revision: true,
           enabled: true,
+          isAnonymous: true,
+          authenticationStatus: true,
         },
       });
     },

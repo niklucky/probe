@@ -75,6 +75,8 @@ const emptyHeaderForm = (origin = '') => ({
 
 const emptyProfileForm = {
   name: '',
+  description: '',
+  mode: 'basic' as 'basic' | 'advanced',
   enabled: true,
   variableIds: [] as number[],
   cookieIds: [] as number[],
@@ -611,55 +613,7 @@ export function EnvironmentsPage() {
                     }}
                   >
                     <ShieldCheck className="mr-2 h-4 w-4" />
-                    Profiles
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setVariablesEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                      });
-                      setEditingVariableId(null);
-                      setVariableForm(emptyVariableForm);
-                      setVariableError('');
-                    }}
-                  >
-                    <KeyRound className="mr-2 h-4 w-4" />
-                    Variables
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setCookiesEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                      });
-                      resetCookieEditor();
-                    }}
-                  >
-                    <Cookie className="mr-2 h-4 w-4" />
-                    Cookies
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const baseOrigin = new URL(environment.baseUrl).origin;
-                      setHeadersEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                        baseOrigin,
-                      });
-                      setEditingHeaderId(null);
-                      setHeaderForm(emptyHeaderForm(baseOrigin));
-                      setHeaderError('');
-                    }}
-                  >
-                    <Braces className="mr-2 h-4 w-4" />
-                    Headers
+                    Test profiles
                   </Button>
                 </div>
               </div>
@@ -695,11 +649,12 @@ export function EnvironmentsPage() {
       >
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{profilesEnvironment?.name} profiles</DialogTitle>
+            <DialogTitle>{profilesEnvironment?.name} test profiles</DialogTitle>
             <DialogDescription>
-              Profiles have no inheritance. Each authentication binding must be
-              selected explicitly. Anonymous may expose variables to test code
-              but never injects cookies or headers.
+              Test profiles describe a browser role and starting authentication
+              state. Guest is always unauthenticated. Advanced keeps the legacy
+              variable, cookie, and exact-origin header bindings available while
+              sessions are migrated to direct encrypted state.
             </DialogDescription>
           </DialogHeader>
 
@@ -733,64 +688,170 @@ export function EnvironmentsPage() {
               </div>
             </div>
 
-            {(
-              [
-                [
-                  'Variables',
-                  'variableIds',
-                  profileVariables,
-                  (item: (typeof profileVariables)[number]) => item.key,
-                ],
-                [
-                  'Cookies',
-                  'cookieIds',
-                  profileCookies,
-                  (item: (typeof profileCookies)[number]) => item.name,
-                ],
-                [
-                  'Headers',
-                  'headerIds',
-                  profileHeaders,
-                  (item: (typeof profileHeaders)[number]) =>
-                    `${item.name} · ${item.origin}`,
-                ],
-              ] as const
-            ).map(([title, field, items, labelFor]) => (
-              <div key={field} className="grid gap-2 rounded-md border p-3">
-                <div className="text-sm font-medium">{title}</div>
-                {items.length ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {items.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={profileForm[field].includes(item.id)}
-                          disabled={
-                            field !== 'variableIds' && editingProfileIsAnonymous
-                          }
-                          onCheckedChange={(checked) =>
-                            toggleProfileBinding(
-                              field,
-                              item.id,
-                              checked === true,
-                            )
-                          }
-                        />
-                        <span className="truncate">
-                          {labelFor(item as never)}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    No {title.toLowerCase()} configured.
-                  </p>
-                )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="profile-description">
+                  Role and intended use
+                </Label>
+                <Input
+                  id="profile-description"
+                  value={profileForm.description}
+                  onChange={(event) =>
+                    setProfileForm({
+                      ...profileForm,
+                      description: event.target.value,
+                    })
+                  }
+                  placeholder="Administrators with access to user management"
+                  disabled={editingProfileIsAnonymous}
+                />
               </div>
-            ))}
+              <div className="grid gap-2">
+                <Label htmlFor="profile-mode">Mode</Label>
+                <select
+                  id="profile-mode"
+                  className="flex h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={profileForm.mode}
+                  onChange={(event) =>
+                    setProfileForm({
+                      ...profileForm,
+                      mode: event.target.value as 'basic' | 'advanced',
+                    })
+                  }
+                  disabled={editingProfileIsAnonymous}
+                >
+                  <option value="basic">Basic — captured session</option>
+                  <option value="advanced">
+                    Advanced — cookies and headers
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            {profileForm.mode === 'advanced' && (
+              <div className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <p>
+                  Cookie expiration only controls browser storage. It cannot
+                  extend the server session or token lifetime. Legacy bindings
+                  remain available here only for migration compatibility.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      setVariablesEnvironment(profilesEnvironment);
+                      setProfilesEnvironment(null);
+                      setEditingVariableId(null);
+                      setVariableForm(emptyVariableForm);
+                    }}
+                  >
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Legacy variables
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      setCookiesEnvironment(profilesEnvironment);
+                      setProfilesEnvironment(null);
+                      resetCookieEditor();
+                    }}
+                  >
+                    <Cookie className="mr-2 h-4 w-4" />
+                    Legacy cookies
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      const environment = (environments ?? []).find(
+                        ({ id }) => id === profilesEnvironment.id,
+                      );
+                      if (!environment) return;
+                      const baseOrigin = new URL(environment.baseUrl).origin;
+                      setHeadersEnvironment({
+                        ...profilesEnvironment,
+                        baseOrigin,
+                      });
+                      setProfilesEnvironment(null);
+                      setEditingHeaderId(null);
+                      setHeaderForm(emptyHeaderForm(baseOrigin));
+                    }}
+                  >
+                    <Braces className="mr-2 h-4 w-4" />
+                    Legacy headers
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {profileForm.mode === 'advanced' &&
+              (
+                [
+                  [
+                    'Variables',
+                    'variableIds',
+                    profileVariables,
+                    (item: (typeof profileVariables)[number]) => item.key,
+                  ],
+                  [
+                    'Cookies',
+                    'cookieIds',
+                    profileCookies,
+                    (item: (typeof profileCookies)[number]) => item.name,
+                  ],
+                  [
+                    'Headers',
+                    'headerIds',
+                    profileHeaders,
+                    (item: (typeof profileHeaders)[number]) =>
+                      `${item.name} · ${item.origin}`,
+                  ],
+                ] as const
+              ).map(([title, field, items, labelFor]) => (
+                <div key={field} className="grid gap-2 rounded-md border p-3">
+                  <div className="text-sm font-medium">{title}</div>
+                  {items.length ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {items.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <Checkbox
+                            checked={profileForm[field].includes(item.id)}
+                            disabled={
+                              field !== 'variableIds' &&
+                              editingProfileIsAnonymous
+                            }
+                            onCheckedChange={(checked) =>
+                              toggleProfileBinding(
+                                field,
+                                item.id,
+                                checked === true,
+                              )
+                            }
+                          />
+                          <span className="truncate">
+                            {labelFor(item as never)}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No {title.toLowerCase()} configured.
+                    </p>
+                  )}
+                </div>
+              ))}
 
             <div className="flex justify-end gap-2">
               {editingProfileId && (
@@ -824,16 +885,35 @@ export function EnvironmentsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{profile.name}</span>
-                    {profile.isAnonymous && <Badge>Anonymous</Badge>}
+                    {profile.isAnonymous && <Badge>Guest</Badge>}
+                    <Badge variant="outline">{profile.mode}</Badge>
+                    <Badge
+                      variant={
+                        profile.authenticationStatus === 'ready'
+                          ? 'default'
+                          : 'secondary'
+                      }
+                    >
+                      {profile.authenticationStatus.replace(/_/g, ' ')}
+                    </Badge>
                     {!profile.enabled && (
                       <Badge variant="secondary">Disabled</Badge>
                     )}
                     <Badge variant="outline">revision {profile.revision}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {profile.variableIds.length} variables ·{' '}
-                    {profile.cookieIds.length} cookies ·{' '}
-                    {profile.headerIds.length} headers
+                    {profile.description || 'No role description'} · revision{' '}
+                    {profile.revision}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Captured{' '}
+                    {profile.capturedAt
+                      ? new Date(profile.capturedAt).toLocaleString()
+                      : 'never'}{' '}
+                    · Verified{' '}
+                    {profile.verifiedAt
+                      ? new Date(profile.verifiedAt).toLocaleString()
+                      : 'never'}
                   </p>
                 </div>
                 <div className="flex gap-1">
@@ -846,6 +926,8 @@ export function EnvironmentsPage() {
                       setEditingProfileIsAnonymous(profile.isAnonymous);
                       setProfileForm({
                         name: profile.name,
+                        description: profile.description ?? '',
+                        mode: profile.mode,
                         enabled: profile.enabled,
                         variableIds: profile.variableIds,
                         cookieIds: profile.cookieIds,

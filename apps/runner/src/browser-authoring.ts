@@ -22,6 +22,8 @@ import { runnerConfig } from './config';
 import {
   cookieVariableReferences,
   headerVariableReferences,
+  decryptProfileAuthentication,
+  runtimeProfileAuthentication,
   resolveRuntimeCookies,
   resolveRuntimeEnvironment,
   resolveRuntimeHeaders,
@@ -299,12 +301,16 @@ export async function runBrowserAuthoringSession(
     const specification = payload.specification;
     const requiredVariables =
       extractEnvironmentVariableReferencesFromValue(specification);
-    const cookieDefinitions = payload.environmentProfile.isAnonymous
-      ? []
-      : await repository.listEnvironmentCookies(payload.environmentProfileId);
-    const headerDefinitions = payload.environmentProfile.isAnonymous
-      ? []
-      : await repository.listEnvironmentHeaders(payload.environmentProfileId);
+    const cookieDefinitions =
+      payload.environmentProfile.isAnonymous ||
+      payload.startingState === 'signed_out'
+        ? []
+        : await repository.listEnvironmentCookies(payload.environmentProfileId);
+    const headerDefinitions =
+      payload.environmentProfile.isAnonymous ||
+      payload.startingState === 'signed_out'
+        ? []
+        : await repository.listEnvironmentHeaders(payload.environmentProfileId);
     const cookieReferences = cookieVariableReferences(cookieDefinitions);
     const headerReferences = headerVariableReferences(headerDefinitions);
     const references = [
@@ -324,10 +330,13 @@ export async function runBrowserAuthoringSession(
     if (
       !currentProfile ||
       !currentProfile.enabled ||
+      (payload.startingState === 'profile_authentication' &&
+        !currentProfile.isAnonymous &&
+        currentProfile.authenticationStatus !== 'ready') ||
       currentProfile.revision !== payload.environmentProfileRevision
     ) {
       throw new Error(
-        'Environment profile changed before browser exploration started',
+        `${payload.environmentProfileName} authentication is unavailable or changed. Refresh the test profile before running this test.`,
       );
     }
     const resolved = resolveRuntimeEnvironment(
@@ -336,6 +345,18 @@ export async function runBrowserAuthoringSession(
       payload.environmentId,
       runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
     );
+    const profileAuthentication =
+      payload.startingState === 'profile_authentication'
+        ? runtimeProfileAuthentication(
+            decryptProfileAuthentication(
+              payload.environmentProfile.encryptedAuthentication,
+              payload.environmentId,
+              payload.environmentProfileId,
+              runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
+            ),
+            payload.environment.baseUrl,
+          )
+        : { storageState: undefined, cookies: [], headers: [] };
     const runtimeEnvironment = {
       ...resolved,
       secretNames: runtimeSensitiveVariableNames(
@@ -343,12 +364,19 @@ export async function runBrowserAuthoringSession(
         cookieReferences,
         headerReferences,
       ),
-      cookies: resolveRuntimeCookies(
-        cookieDefinitions,
-        payload.environment.baseUrl,
-        resolved.values,
-      ),
-      headers: resolveRuntimeHeaders(headerDefinitions, resolved.values),
+      cookies: [
+        ...resolveRuntimeCookies(
+          cookieDefinitions,
+          payload.environment.baseUrl,
+          resolved.values,
+        ),
+        ...profileAuthentication.cookies,
+      ],
+      headers: [
+        ...resolveRuntimeHeaders(headerDefinitions, resolved.values),
+        ...profileAuthentication.headers,
+      ],
+      storageState: profileAuthentication.storageState,
     };
     browser = await startAuthoringBrowser(
       {

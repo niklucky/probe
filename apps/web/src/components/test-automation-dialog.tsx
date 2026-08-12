@@ -65,6 +65,9 @@ export function TestAutomationDialog({
   const [isSourceReady, setIsSourceReady] = useState(canGenerate);
   const [environmentId, setEnvironmentId] = useState("");
   const [environmentProfileId, setEnvironmentProfileId] = useState("");
+  const [startingState, setStartingState] = useState<
+    "profile_authentication" | "signed_out"
+  >("profile_authentication");
   const [connectionId, setConnectionId] = useState("");
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState("");
@@ -302,6 +305,7 @@ export function TestAutomationDialog({
         sourceTestCaseVersionId: sourceVersionId,
         environmentId: Number(environmentId),
         environmentProfileId: Number(environmentProfileId),
+        startingState,
         connectionId: selectedConnection,
       });
       return;
@@ -311,6 +315,7 @@ export function TestAutomationDialog({
       sourceTestCaseVersionId: sourceVersionId,
       environmentId: Number(environmentId),
       environmentProfileId: Number(environmentProfileId),
+      startingState,
       connectionId: selectedConnection,
     });
   };
@@ -429,7 +434,7 @@ export function TestAutomationDialog({
               </Alert>
             )}
 
-            <div className="grid gap-4 xl:grid-cols-3">
+            <div className="grid gap-4 xl:grid-cols-4">
               <div className="grid min-w-0 gap-2">
                 <Label htmlFor="automation-environment">Environment</Label>
                 <Select
@@ -448,7 +453,7 @@ export function TestAutomationDialog({
                 </Select>
               </div>
               <div className="grid min-w-0 gap-2">
-                <Label htmlFor="automation-profile">Browser profile</Label>
+                <Label htmlFor="automation-profile">Test profile</Label>
                 <Select
                   id="automation-profile"
                   className="min-w-0"
@@ -463,13 +468,43 @@ export function TestAutomationDialog({
                     <option
                       key={profile.id}
                       value={profile.id}
-                      disabled={!profile.enabled}
+                      disabled={
+                        !profile.enabled ||
+                        (startingState === "profile_authentication" &&
+                          !profile.isAnonymous &&
+                          profile.authenticationStatus !== "ready")
+                      }
                     >
                       {profile.name}
-                      {profile.isAnonymous ? " (no authentication)" : ""}
+                      {profile.isAnonymous ? " (Guest)" : ""}
+                      {profile.authenticationStatus !== "ready"
+                        ? ` (${profile.authenticationStatus.replace(/_/g, " ")})`
+                        : ""}
                       {!profile.enabled ? " (disabled)" : ""}
                     </option>
                   ))}
+                </Select>
+              </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="automation-starting-state">
+                  Starting state
+                </Label>
+                <Select
+                  id="automation-starting-state"
+                  className="min-w-0"
+                  value={startingState}
+                  onChange={(event) => {
+                    setStartingState(
+                      event.target.value as
+                        "profile_authentication" | "signed_out",
+                    );
+                    setEnvironmentProfileId("");
+                  }}
+                >
+                  <option value="profile_authentication">
+                    Use profile authentication
+                  </option>
+                  <option value="signed_out">Start signed out</option>
                 </Select>
               </div>
               <div className="grid min-w-0 gap-2">
@@ -1098,7 +1133,7 @@ function AutomationExecutionHistory({
         </div>
         <div className="flex items-center gap-3">
           <select
-            aria-label="Execution browser profile"
+            aria-label="Execution test profile"
             className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
             value={profileId}
             onChange={(event) => setProfileId(event.target.value)}
@@ -1172,7 +1207,7 @@ function AutomationExecutionHistory({
       </div>
       {!profilesLoading && !hasRunnableProfile && (
         <p className="text-sm text-destructive">
-          The automation&apos;s environment profile was deleted, disabled, or
+          The automation&apos;s test profile was deleted, disabled, or
           changed. Regenerate the automation before running it.
         </p>
       )}

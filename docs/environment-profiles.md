@@ -1,27 +1,53 @@
-# Environment profiles
+# Test profiles
 
-Environment profiles define explicit browser authentication states for an
-environment. Every environment has a protected **Anonymous** profile, and users
-can add profiles such as **Authenticated User** or **Administrator**.
+Test profiles define the browser identity and starting authentication state for
+one environment. Every environment has a protected **Guest** profile. Teams can
+add role-oriented profiles such as **Admin**, **Manager**, or **Regular user**.
+Profiles are explicit and never inherit authentication from another profile or
+environment.
 
-Profiles do not inherit from the environment or from each other. A profile
-contains only references to selected environment variables, cookie templates,
-and header templates. Plaintext values are never copied into profile records.
-The Anonymous profile cannot be renamed, deleted, or assigned cookies or
-headers, so an anonymous run never inherits browser authentication state. It
-may expose selected variables to test code, which allows a login-flow test to
-enter credentials while still starting from an unauthenticated browser.
+## Modes and status
 
-Automation generation and execution each require an explicit enabled profile.
-Automation and execution records store the selected profile id, name, and
-revision. Editing a selected variable, cookie, header, profile name, or profile
-bindings increments that revision. Generated automation is then shown as stale,
-and a queued execution fails safely if its recorded revision no longer matches.
-Disabling or removing a profile never falls back to another, potentially more
-privileged profile.
+**Basic** is the default. Its encrypted Playwright-compatible storage state
+contains cookies and origin-scoped local storage captured after interactive
+sign-in. **Advanced** additionally supports direct cookies and request headers;
+headers are applied only to the configured environment's exact origin and are
+reevaluated after every redirect.
 
-Existing environments receive an Anonymous profile during migration. Existing
-automation records remain unprofiled and cannot be queued until regenerated.
-An accepted automation can only run with the exact profile id and revision it
-was generated against. Existing execution history remains readable without
-inventing an authentication state.
+Profiles expose only safe metadata: name, role description, mode, status,
+revision, and capture/verification timestamps. Authentication status is
+`Ready`, `Needs verification`, or `Expired`. Guest is always ready and contains
+no authentication material. Cookie expiration affects browser storage only and
+does not extend server-side sessions or tokens.
+
+Captured state, optional profile credentials, direct cookie values, and header
+values are encrypted with AES-256-GCM. The authenticated-encryption associated
+data includes both the environment and profile identity. Saved secret values
+are never returned by the API.
+
+## Generation and execution
+
+Manual generation and automation authoring select an environment, a test
+profile, and one of two starting states:
+
+- **Use profile authentication** prepares the browser before the model sees the
+  page. The model receives only the profile name and description and is told not
+  to add login steps unless authentication itself is under test.
+- **Start signed out** deliberately ignores saved authentication. This supports
+  guest scenarios and login tests without creating a second role profile.
+
+The test version, generated automation, browser-authoring session, and execution
+job retain the profile ID, name, revision, and starting state. Disabled,
+unverified, expired, unreadable, or revised authenticated profiles fail closed.
+The generated Playwright source stays focused on application behavior; profile
+state is injected by Probe's isolated runtime and secret values are redacted
+from logs and browser transcripts.
+
+## Migration
+
+The migration renames existing Anonymous profiles to Guest. Existing profiles
+with cookie or header bindings become Advanced and remain usable through the
+compatibility runtime. Profiles without an unambiguous authentication binding
+are marked Needs verification, so they cannot silently acquire or reuse an
+authentication state. Existing automation revisions continue to use strict
+revision matching and must be regenerated after profile changes.

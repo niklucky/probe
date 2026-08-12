@@ -4,6 +4,7 @@ import {
   createEnvironmentHeaderInputSchema,
   createEnvironmentVariableInputSchema,
   createEnvironmentProfileInputSchema,
+  captureEnvironmentProfileSessionInputSchema,
   environmentIdInputSchema,
   environmentCookieIdInputSchema,
   environmentCookieSchema,
@@ -70,6 +71,12 @@ export const environmentsRouter = router({
     .output(environmentProfileSchema)
     .mutation(({ ctx, input }) =>
       ctx.services.environments.updateProfile(input, ctx.user.id),
+    ),
+  captureProfileSession: protectedProcedure
+    .input(captureEnvironmentProfileSessionInputSchema)
+    .output(environmentProfileSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.captureProfileSession(input, ctx.user.id),
     ),
   deleteProfile: protectedProcedure
     .input(environmentProfileIdInputSchema)

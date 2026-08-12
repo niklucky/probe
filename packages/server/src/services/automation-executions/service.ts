@@ -63,18 +63,19 @@ export function createAutomationExecutionService(
         automation.environmentProfileRevision === null
       ) {
         throw new ConflictError(
-          'Automation has no environment profile snapshot and must be regenerated',
+          'Automation has no test profile snapshot and must be regenerated',
         );
       }
       if (input.environmentProfileId !== automation.environmentProfileId) {
         throw new ConflictError(
-          'Automation must be executed with the environment profile it was generated against',
+          'Automation must be executed with the test profile it was generated against',
         );
       }
       const profile = await environments.getEnabledProfile(
         input.environmentProfileId,
         automation.environmentId,
         userId,
+        automation.startingState,
       );
       if (profile.revision !== automation.environmentProfileRevision) {
         throw new ConflictError(
@@ -109,6 +110,7 @@ export function createAutomationExecutionService(
         environmentProfileId: profile.id,
         environmentProfileName: profile.name,
         environmentProfileRevision: profile.revision,
+        startingState: automation.startingState,
         requestedById: userId,
         timeoutSeconds: input.timeoutSeconds,
         settings: {

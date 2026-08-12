@@ -68,6 +68,7 @@ export function createBrowserAuthoringService(
         input.environmentProfileId,
         environment.id,
         userId,
+        input.startingState ?? 'profile_authentication',
       );
       const { connectionRef } = await aiConnections.getAdapter(
         'test-authoring',
@@ -83,6 +84,7 @@ export function createBrowserAuthoringService(
           environmentProfileId: profile.id,
           environmentProfileName: profile.name,
           environmentProfileRevision: profile.revision,
+          startingState: input.startingState ?? 'profile_authentication',
           connectionRef,
           promptVersion: BROWSER_AUTHORING_PROMPT_VERSION,
           toolContractVersion: BROWSER_TOOL_CONTRACT_VERSION,

@@ -2,6 +2,7 @@ import { aiAuthoringJobs } from '@probe/db';
 import { createSelectSchema } from 'drizzle-zod';
 import { z } from 'zod';
 import { testSpecSchema } from './test-cases';
+import { testStartingStateSchema } from './environments';
 
 export const aiConnectionReferenceSchema = z
   .number()
@@ -17,6 +18,8 @@ export const requestAiTestCaseProposalInputSchema = z
     description: z.string().trim().max(20_000).optional(),
     instruction: z.string().trim().max(10_000).optional(),
     environmentId: z.number().int().positive().optional(),
+    environmentProfileId: z.number().int().positive().optional(),
+    startingState: testStartingStateSchema.optional(),
     connectionId: aiConnectionReferenceSchema.optional(),
   })
   .superRefine((input, context) => {
@@ -32,6 +35,30 @@ export const requestAiTestCaseProposalInputSchema = z
         code: z.ZodIssueCode.custom,
         path: ['testCaseId'],
         message: 'Choose a test case to improve',
+      });
+    }
+    if (input.environmentId && !input.environmentProfileId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['environmentProfileId'],
+        message: 'Choose a test profile',
+      });
+    }
+    if (input.environmentId && !input.startingState) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['startingState'],
+        message: 'Choose whether the test starts authenticated or signed out',
+      });
+    }
+    if (
+      !input.environmentId &&
+      (input.environmentProfileId || input.startingState)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['environmentId'],
+        message: 'Choose an environment before a test profile',
       });
     }
   });

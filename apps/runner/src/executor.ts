@@ -63,6 +63,13 @@ export interface RuntimeEnvironment {
     value: string;
     origin: string;
   }>;
+  storageState?: {
+    cookies: Array<Record<string, unknown>>;
+    origins: Array<{
+      origin: string;
+      localStorage: Array<{ name: string; value: string }>;
+    }>;
+  };
 }
 
 interface ExecutionOutcome {
@@ -161,7 +168,7 @@ export function buildDockerArgs(
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',
-    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length || runtimeEnvironment.cookies.length || runtimeEnvironment.headers.length ? 'true' : 'false'}`,
+    `HAS_TEST_SECRETS=${runtimeEnvironment.secretNames.length || runtimeEnvironment.cookies.length || runtimeEnvironment.headers.length || runtimeEnvironment.storageState ? 'true' : 'false'}`,
   ];
   if (runtimeEnvironment.cookies.length) {
     // The value is inherited from the runner process and never appears in the
@@ -172,6 +179,9 @@ export function buildDockerArgs(
     // As with cookies, Docker inherits this value from the runner process so
     // resolved header values never appear in process arguments.
     args.push('--env', 'PROBE_ENVIRONMENT_HEADERS');
+  }
+  if (runtimeEnvironment.storageState) {
+    args.push('--env', 'PROBE_STORAGE_STATE');
   }
   for (const name of Object.keys(runtimeEnvironment.values).sort()) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
@@ -191,6 +201,23 @@ export function withEnvironmentCookieHook(source: string, hasCookies: boolean) {
 __probeCookieTest.beforeEach(async ({ context }) => {
   const cookies = JSON.parse(process.env.PROBE_ENVIRONMENT_COOKIES ?? '[]');
   await context.addCookies(cookies);
+});
+${source}`;
+}
+
+export function withProfileStorageStateHook(
+  source: string,
+  hasStorageState: boolean,
+) {
+  if (!hasStorageState) return source;
+  return `import { test as __probeStorageTest } from '@playwright/test';
+__probeStorageTest.beforeEach(async ({ context, page }) => {
+  const state = JSON.parse(process.env.PROBE_STORAGE_STATE ?? '{"cookies":[],"origins":[]}');
+  if (state.cookies.length) await context.addCookies(state.cookies);
+  const values = state.origins.find((item) => item.origin === new URL(process.env.BASE_URL).origin)?.localStorage ?? [];
+  if (values.length) await page.addInitScript((entries) => {
+    for (const entry of entries) localStorage.setItem(entry.name, entry.value);
+  }, values);
 });
 ${source}`;
 }
@@ -299,9 +326,12 @@ export async function executeInContainer(
   await writeFile(
     sourcePath,
     withEnvironmentHeaderHook(
-      withEnvironmentCookieHook(
-        payload.automation.source,
-        runtimeEnvironment.cookies.length > 0,
+      withProfileStorageStateHook(
+        withEnvironmentCookieHook(
+          payload.automation.source,
+          runtimeEnvironment.cookies.length > 0,
+        ),
+        Boolean(runtimeEnvironment.storageState),
       ),
       runtimeEnvironment.headers.length > 0,
     ),
@@ -324,6 +354,28 @@ export async function executeInContainer(
     ...runtimeEnvironment.headers.map(
       (header, index) =>
         [`header:${index}:${header.name}`, header.value] as const,
+    ),
+    ...(
+      (runtimeEnvironment.storageState?.cookies ?? []) as Array<{
+        name?: string;
+        value?: string;
+      }>
+    ).map(
+      (cookie, index) =>
+        [
+          `storage-cookie:${index}:${cookie.name ?? 'cookie'}`,
+          cookie.value ?? '',
+        ] as const,
+    ),
+    ...(runtimeEnvironment.storageState?.origins ?? []).flatMap(
+      (origin, originIndex) =>
+        origin.localStorage.map(
+          (entry, index) =>
+            [
+              `storage:${originIndex}:${index}:${entry.name}`,
+              entry.value,
+            ] as const,
+        ),
     ),
   ]);
 
@@ -358,6 +410,13 @@ export async function executeInContainer(
           ? {
               PROBE_ENVIRONMENT_HEADERS: JSON.stringify(
                 runtimeEnvironment.headers,
+              ),
+            }
+          : {}),
+        ...(runtimeEnvironment.storageState
+          ? {
+              PROBE_STORAGE_STATE: JSON.stringify(
+                runtimeEnvironment.storageState,
               ),
             }
           : {}),

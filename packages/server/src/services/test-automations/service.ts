@@ -167,6 +167,7 @@ export function createTestAutomationService(
         input.environmentProfileId,
         environment.id,
         userId,
+        input.startingState ?? 'profile_authentication',
       );
 
       const specification = {
@@ -215,6 +216,7 @@ export function createTestAutomationService(
             environment,
             profile,
             referencedMetadata,
+            input.startingState ?? 'profile_authentication',
           ),
           schema: automationSourceJsonSchema,
           schemaName: 'playwright_typescript_automation',
@@ -244,6 +246,7 @@ export function createTestAutomationService(
               environmentProfileId: profile.id,
               environmentProfileName: profile.name,
               environmentProfileRevision: profile.revision,
+              startingState: input.startingState ?? 'profile_authentication',
               versionNumber,
               framework: 'playwright',
               language: 'typescript',
@@ -309,13 +312,14 @@ export function createTestAutomationService(
       }
       if (!automation.environmentProfileId) {
         throw new ConflictError(
-          'Automation has no environment profile; regenerate it before accepting',
+          'Automation has no test profile; regenerate it before accepting',
         );
       }
       const profile = await environments.getEnabledProfile(
         automation.environmentProfileId,
         automation.environmentId,
         userId,
+        automation.startingState,
       );
       if (profile.revision !== automation.environmentProfileRevision) {
         throw new ConflictError(

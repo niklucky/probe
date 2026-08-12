@@ -1,4 +1,4 @@
-export const TEST_AUTOMATION_PROMPT_VERSION = 'playwright-typescript-v3';
+export const TEST_AUTOMATION_PROMPT_VERSION = 'playwright-typescript-v4';
 
 export const automationSourceJsonSchema = {
   type: 'object',
@@ -22,22 +22,31 @@ export const automationSystemPrompt = [
 export function automationPrompt(
   spec: {
     title: string;
-    description: string | null;
+    description?: string | null;
     prerequisites: string[];
     steps: Array<string | { action: string; expectedResult?: string }>;
     expectedResult: string;
   },
   environment: { name: string; type: string; baseUrl: string },
-  profile: { name: string; isAnonymous: boolean },
+  profile: {
+    name: string;
+    description?: string | null;
+    isAnonymous: boolean;
+  },
   variables: Array<{
     key: string;
     description: string | null;
     isSecret: boolean;
   }>,
+  startingState:
+    'profile_authentication' | 'signed_out' = 'profile_authentication',
 ) {
   return [
     `Target environment:\n${JSON.stringify({ name: environment.name, type: environment.type, baseUrl: environment.baseUrl })}`,
-    `Selected browser profile:\n${JSON.stringify({ name: profile.name, anonymous: profile.isAnonymous })}`,
+    `Selected test profile (safe metadata only):\n${JSON.stringify({ name: profile.name, description: profile.description, guest: profile.isAnonymous, startingState })}`,
+    startingState === 'profile_authentication'
+      ? `The browser starts authenticated using the ${profile.name} test profile. Do not generate login steps or authentication setup unless authentication itself is the test subject.`
+      : 'The browser starts signed out. Do not generate authentication setup outside the requested application behavior.',
     `Referenced environment variable metadata (values are intentionally omitted):\n${JSON.stringify(variables)}`,
     `Required placeholder mappings:\n${variables
       .map(({ key }) => `{{${key}}} => process.env.${key}`)

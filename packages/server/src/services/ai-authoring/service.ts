@@ -192,6 +192,22 @@ export function createAiAuthoringService(
             baseUrl: environment.baseUrl,
           }
         : undefined;
+      const profile =
+        environment && input.environmentProfileId && input.startingState
+          ? await environments.getEnabledProfile(
+              input.environmentProfileId,
+              environment.id,
+              userId,
+              input.startingState,
+            )
+          : undefined;
+      const profileContext = profile
+        ? {
+            name: profile.name,
+            description: profile.description,
+            startingState: input.startingState!,
+          }
+        : undefined;
 
       let currentSpec: TestSpec | undefined;
       if (input.operation === 'improve') {
@@ -221,6 +237,15 @@ export function createAiAuthoringService(
         description: safeDescription,
         instruction: safeInstruction,
         environment: environmentContext,
+        profile: profile
+          ? {
+              id: profile.id,
+              name: profile.name,
+              description: profile.description,
+              revision: profile.revision,
+              startingState: input.startingState,
+            }
+          : undefined,
         currentSpec,
       });
       const job = await repository.create({
@@ -241,11 +266,16 @@ export function createAiAuthoringService(
         const result = await generateValidated(
           adapter,
           input.operation === 'generate'
-            ? generationPrompt(safeDescription!, environmentContext)
+            ? generationPrompt(
+                safeDescription!,
+                environmentContext,
+                profileContext,
+              )
             : improvementPrompt(
                 currentSpec!,
                 safeInstruction,
                 environmentContext,
+                profileContext,
               ),
         );
         const proposal = sanitizeSnapshot(result.value);
@@ -280,9 +310,33 @@ export function createAiAuthoringService(
       }
 
       const validated = testSpecSchema.parse(proposal);
+      const inputSnapshot = job.inputSnapshot as {
+        environment?: { id: number };
+        profile?: {
+          id: number;
+          name: string;
+          revision: number;
+          startingState: 'profile_authentication' | 'signed_out';
+        };
+      };
+      const profileContext =
+        inputSnapshot.environment && inputSnapshot.profile
+          ? {
+              environmentId: inputSnapshot.environment.id,
+              environmentProfileId: inputSnapshot.profile.id,
+              environmentProfileName: inputSnapshot.profile.name,
+              environmentProfileRevision: inputSnapshot.profile.revision,
+              startingState: inputSnapshot.profile.startingState,
+            }
+          : {};
       if (job.operation === 'generate') {
         const created = await testCases.create(
-          { suiteId: job.suiteId, status: 'draft', ...validated },
+          {
+            suiteId: job.suiteId,
+            status: 'draft',
+            ...validated,
+            ...profileContext,
+          },
           userId,
         );
         await repository.accept(job.id, userId);
@@ -296,7 +350,7 @@ export function createAiAuthoringService(
         throw new ConflictError('AI proposal has no target test case');
       }
       const updated = await testCases.update(
-        { id: job.testCaseId, ...validated },
+        { id: job.testCaseId, ...validated, ...profileContext },
         userId,
       );
       await repository.accept(job.id, userId);
