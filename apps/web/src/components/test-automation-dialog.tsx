@@ -350,6 +350,7 @@ export function TestAutomationDialog({
             automationId: automation.id,
             environmentProfileId: automation.environmentProfileId,
             timeoutSeconds: 300,
+            captureDiagnostics: false,
             captureVideo: false,
             applyEnvironmentCookies: true,
             applyEnvironmentHeaders: true,
@@ -1176,6 +1177,7 @@ function AutomationExecutionHistory({
   }) => void;
 }) {
   const [error, setError] = useState("");
+  const [captureDiagnostics, setCaptureDiagnostics] = useState(false);
   const [captureVideo, setCaptureVideo] = useState(false);
   const [applyEnvironmentCookies, setApplyEnvironmentCookies] = useState(true);
   const [applyEnvironmentHeaders, setApplyEnvironmentHeaders] = useState(true);
@@ -1230,6 +1232,7 @@ function AutomationExecutionHistory({
       automationId: queuedAutomationId,
       environmentProfileId: queuedEnvironmentProfileId,
       timeoutSeconds: 300,
+      captureDiagnostics,
       captureVideo,
       applyEnvironmentCookies,
       applyEnvironmentHeaders,
@@ -1296,6 +1299,16 @@ function AutomationExecutionHistory({
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
+              checked={captureDiagnostics}
+              onChange={(event) =>
+                setCaptureDiagnostics(event.target.checked)
+              }
+            />
+            Visual diagnostics
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
               checked={captureVideo}
               onChange={(event) => setCaptureVideo(event.target.checked)}
             />
@@ -1340,6 +1353,17 @@ function AutomationExecutionHistory({
           </Button>
         </div>
       </div>
+      {captureDiagnostics && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Sensitive visual artifacts enabled</AlertTitle>
+          <AlertDescription>
+            Failure screenshots and traces may contain page data or values
+            entered during the test. Access remains restricted to automation
+            authors through expiring download links.
+          </AlertDescription>
+        </Alert>
+      )}
       {!profilesLoading && !hasRunnableProfile && (
         <p className="text-sm text-destructive">
           The automation&apos;s test profile was deleted, disabled, or

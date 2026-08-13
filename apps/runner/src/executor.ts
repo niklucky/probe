@@ -15,6 +15,7 @@ export interface ExecutionPayload {
   id: number;
   timeoutSeconds: number;
   settings: {
+    captureDiagnostics?: boolean;
     captureVideo: boolean;
     applyEnvironmentCookies: boolean;
     applyEnvironmentHeaders: boolean;
@@ -165,6 +166,8 @@ export function buildDockerArgs(
     `BASE_URL=${approvedTarget(payload.environment.baseUrl)}`,
     '--env',
     `CAPTURE_VIDEO=${payload.settings.captureVideo ? 'on' : 'off'}`,
+    '--env',
+    `CAPTURE_DIAGNOSTICS=${payload.settings.captureDiagnostics ? 'on' : 'off'}`,
     '--env',
     `JOB_TIMEOUT_MS=${payload.timeoutSeconds * 1000}`,
     '--env',

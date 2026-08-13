@@ -561,6 +561,7 @@ export async function runBrowserAuthoringSession(
           : null,
         executionSettings: {
           browser: 'chromium',
+          captureDiagnostics: false,
           captureVideo: false,
           applyEnvironmentCookies: true,
           applyEnvironmentHeaders: true,

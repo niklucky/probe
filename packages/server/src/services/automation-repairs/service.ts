@@ -286,6 +286,8 @@ export function createAutomationRepairService(
       timeoutSeconds: session.sourceExecution.timeoutSeconds,
       settings: {
         browser: 'chromium' as const,
+        captureDiagnostics:
+          session.sourceExecution.settings.captureDiagnostics ?? false,
         captureVideo: session.sourceExecution.settings.captureVideo,
         applyEnvironmentCookies:
           session.sourceExecution.settings.applyEnvironmentCookies ?? true,

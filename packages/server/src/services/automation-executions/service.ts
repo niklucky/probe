@@ -55,6 +55,9 @@ export function createAutomationExecutionService(
       if (!automation) throw new NotFoundError('Automation not found');
       const projectId = automation.testCase.suite.product.projectId;
       await authorization.requireProject(userId, projectId, 'execute');
+      if (input.captureDiagnostics) {
+        await authorization.requireProject(userId, projectId, 'author');
+      }
       if (automation.status !== 'accepted') {
         throw new ConflictError('Only accepted automation can be executed');
       }
@@ -115,6 +118,7 @@ export function createAutomationExecutionService(
         timeoutSeconds: input.timeoutSeconds,
         settings: {
           browser: 'chromium',
+          captureDiagnostics: input.captureDiagnostics,
           captureVideo: input.captureVideo,
           applyEnvironmentCookies: input.applyEnvironmentCookies,
           applyEnvironmentHeaders: input.applyEnvironmentHeaders,
@@ -170,7 +174,11 @@ export function createAutomationExecutionService(
     async getArtifactUrl(jobId: number, artifactId: number, userId: number) {
       const job = await repository.find(jobId);
       if (!job) throw new NotFoundError('Execution not found');
-      await authorization.requireProject(userId, job.projectId, 'read');
+      await authorization.requireProject(
+        userId,
+        job.projectId,
+        job.settings.captureDiagnostics ? 'author' : 'read',
+      );
       const artifact = await repository.findArtifact(artifactId, jobId);
       if (!artifact || artifact.expiresAt <= new Date()) {
         throw new NotFoundError('Artifact not found or expired');

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AppError } from '@probe/shared/errors/app-error';
 import { createAutomationExecutionService } from './service';
 
 const automation = {
@@ -66,6 +67,7 @@ describe('automation execution API service', () => {
         automationId: 7,
         environmentProfileId: 5,
         timeoutSeconds: 120,
+        captureDiagnostics: true,
         captureVideo: true,
         applyEnvironmentCookies: false,
         applyEnvironmentHeaders: false,
@@ -86,6 +88,7 @@ describe('automation execution API service', () => {
         runnerVersion: 'runner-1',
         containerImage: 'probe-playwright-runner:1',
         captureVideo: true,
+        captureDiagnostics: true,
         applyEnvironmentCookies: false,
         applyEnvironmentHeaders: false,
       },
@@ -127,6 +130,7 @@ describe('automation execution API service', () => {
           automationId: 7,
           environmentProfileId: 6,
           timeoutSeconds: 120,
+          captureDiagnostics: false,
           captureVideo: false,
           applyEnvironmentCookies: true,
           applyEnvironmentHeaders: true,
@@ -142,6 +146,7 @@ describe('automation execution API service', () => {
           automationId: 7,
           environmentProfileId: 5,
           timeoutSeconds: 120,
+          captureDiagnostics: false,
           captureVideo: false,
           applyEnvironmentCookies: true,
           applyEnvironmentHeaders: true,
@@ -149,6 +154,51 @@ describe('automation execution API service', () => {
         4,
       ),
     ).rejects.toThrow('profile changed');
+  });
+
+  test('requires author permission for sensitive visual diagnostics', async () => {
+    let queued = false;
+    const service = createAutomationExecutionService(
+      {
+        async findAutomation() {
+          return automation;
+        },
+        async create() {
+          queued = true;
+        },
+      } as never,
+      {
+        async requireProject(
+          _userId: number,
+          _projectId: number,
+          operation: string,
+        ) {
+          if (operation === 'author') {
+            throw new AppError('NOT_FOUND', 'Resource not found');
+          }
+        },
+      } as never,
+      {} as never,
+      {} as never,
+      'private-artifacts',
+      defaults,
+    );
+
+    await expect(
+      service.queue(
+        {
+          automationId: 7,
+          environmentProfileId: 5,
+          timeoutSeconds: 120,
+          captureDiagnostics: true,
+          captureVideo: false,
+          applyEnvironmentCookies: true,
+          applyEnvironmentHeaders: true,
+        },
+        4,
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(queued).toBe(false);
   });
 
   test('does not expose private object names in execution history', async () => {

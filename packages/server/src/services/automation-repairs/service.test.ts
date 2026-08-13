@@ -28,6 +28,7 @@ function execution(id = 41, automationSource = originalSource) {
     status: 'failed',
     timeoutSeconds: 120,
     settings: {
+      captureDiagnostics: false,
       captureVideo: false,
       applyEnvironmentCookies: true,
       applyEnvironmentHeaders: true,

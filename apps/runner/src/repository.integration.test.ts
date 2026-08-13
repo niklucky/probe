@@ -134,6 +134,7 @@ integrationTest(
         requestedById: user!.id,
         settings: {
           browser: 'chromium',
+          captureDiagnostics: false,
           captureVideo: false,
           applyEnvironmentCookies: true,
           applyEnvironmentHeaders: true,
@@ -231,6 +232,7 @@ integrationTest(
           requestedById: user!.id,
           settings: {
             browser: 'chromium',
+            captureDiagnostics: false,
             captureVideo: false,
             applyEnvironmentCookies: true,
             applyEnvironmentHeaders: true,

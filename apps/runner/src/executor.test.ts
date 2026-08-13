@@ -35,6 +35,7 @@ const payload: ExecutionPayload = {
   id: 42,
   timeoutSeconds: 60,
   settings: {
+    captureDiagnostics: false,
     captureVideo: false,
     applyEnvironmentCookies: true,
     applyEnvironmentHeaders: true,
@@ -69,7 +70,22 @@ describe('isolated execution command', () => {
     expect(args).toContain('--network=probe-runner-egress');
     expect(args).toContain('--label=probe.runner.managed=true');
     expect(args).toContain('--label=probe.execution.job=42');
+    expect(args).toContain('CAPTURE_DIAGNOSTICS=off');
     expect(args.join(' ')).toContain('readonly');
+  });
+
+  test('passes explicit visual diagnostics consent to the execution image', () => {
+    const { args } = buildDockerArgs(
+      {
+        ...payload,
+        settings: { ...payload.settings, captureDiagnostics: true },
+      },
+      '/tmp/source.ts',
+      '/tmp/artifacts',
+      { values: {}, secretNames: [], cookies: [], headers: [] },
+    );
+
+    expect(args).toContain('CAPTURE_DIAGNOSTICS=on');
   });
 
   test('passes secret names without placing secret values in arguments', () => {

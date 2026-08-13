@@ -872,6 +872,7 @@ export const automationExecutionJobs = pgTable(
     settings: jsonb('settings')
       .$type<{
         browser: 'chromium';
+        captureDiagnostics?: boolean;
         captureVideo: boolean;
         applyEnvironmentCookies: boolean;
         applyEnvironmentHeaders: boolean;
