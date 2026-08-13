@@ -71,6 +71,8 @@ export function TestAutomationDialog({
   const [connectionId, setConnectionId] = useState("");
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState("");
+  const [proposalCaptureDiagnostics, setProposalCaptureDiagnostics] =
+    useState(false);
   const [error, setError] = useState("");
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
@@ -151,6 +153,7 @@ export function TestAutomationDialog({
     if (!open) {
       setProposalId(null);
       setSource("");
+      setProposalCaptureDiagnostics(false);
       setError("");
       setSelectedAutomationId(null);
       setSelectedSource("");
@@ -350,7 +353,7 @@ export function TestAutomationDialog({
             automationId: automation.id,
             environmentProfileId: automation.environmentProfileId,
             timeoutSeconds: 300,
-            captureDiagnostics: false,
+            captureDiagnostics: proposalCaptureDiagnostics,
             captureVideo: false,
             applyEnvironmentCookies: true,
             applyEnvironmentHeaders: true,
@@ -617,6 +620,34 @@ export function TestAutomationDialog({
                   onChange={(event) => setSource(event.target.value)}
                   spellCheck={false}
                 />
+                <label className="flex items-start gap-3 rounded-md border p-3">
+                  <Checkbox
+                    checked={proposalCaptureDiagnostics}
+                    onCheckedChange={(checked) =>
+                      setProposalCaptureDiagnostics(checked === true)
+                    }
+                  />
+                  <span className="grid gap-1">
+                    <span className="text-sm font-medium">
+                      Capture visual diagnostics on failure
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Save a Playwright trace and failure screenshot for this
+                      first run.
+                    </span>
+                  </span>
+                </label>
+                {proposalCaptureDiagnostics && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Sensitive visual artifacts enabled</AlertTitle>
+                    <AlertDescription>
+                      Screenshots and traces may contain page data or entered
+                      values. Downloads are restricted to automation authors
+                      and use expiring links.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Button
                     type="button"
