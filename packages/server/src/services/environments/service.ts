@@ -16,6 +16,7 @@ import type {
   UpdateEnvironmentHeaderInput,
   UpdateEnvironmentVariableInput,
   UpdateEnvironmentProfileInput,
+  VerifyEnvironmentProfileInput,
 } from '@probe/shared/schemas/environments';
 import {
   extractEnvironmentVariableReferences,
@@ -219,6 +220,49 @@ export function createEnvironmentService(
           `Profile headers must use the exact environment origin ${baseOrigin}`,
         );
       }
+    }
+    return authentication;
+  }
+
+  async function validateCapturedSession(
+    environmentId: number,
+    authentication: ProfileAuthentication,
+    now = Date.now() / 1000,
+  ) {
+    const environment = await repository.find(environmentId);
+    if (!environment) throw new AppError('NOT_FOUND', 'Environment not found');
+    const target = new URL(environment.baseUrl);
+    const state = authentication.storageState;
+    if (!state) {
+      throw new ConflictError(
+        'No captured session is saved. Capture the authenticated session first.',
+      );
+    }
+    const applicableCookies = state.cookies.filter((cookie) => {
+      try {
+        validateEnvironmentCookieDomain(cookie.domain, environment.baseUrl);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    const applicableOrigins = state.origins.filter(
+      ({ origin, localStorage }) =>
+        origin === target.origin && localStorage.length > 0,
+    );
+    const expiredCookie = applicableCookies.find(
+      ({ expires }) =>
+        typeof expires === 'number' && expires > 0 && expires <= now,
+    );
+    if (expiredCookie) {
+      throw new ConflictError(
+        `${expiredCookie.name} has expired. Refresh the test profile session and try again.`,
+      );
+    }
+    if (!applicableCookies.length && !applicableOrigins.length) {
+      throw new ConflictError(
+        `The captured session contains no cookies or local storage for ${target.origin}. Sign in to that environment before saving the session.`,
+      );
     }
     return authentication;
   }
@@ -673,6 +717,80 @@ export function createEnvironmentService(
       });
       return publicProfile({
         ...profile!,
+        variables: current.variables,
+        cookies: current.cookies,
+        headers: current.headers,
+      });
+    },
+
+    async verifyProfile(input: VerifyEnvironmentProfileInput, userId: number) {
+      const current = await repository.findProfile(input.id);
+      if (!current) throw new AppError('NOT_FOUND', 'Test profile not found');
+      await authorization.require(
+        userId,
+        { type: 'environment', id: current.environmentId },
+        'author',
+      );
+      if (current.isAnonymous) return publicProfile(current);
+
+      if (current.encryptedAuthentication) {
+        let authentication: ProfileAuthentication;
+        try {
+          authentication = JSON.parse(
+            cipher.decrypt(
+              current.encryptedAuthentication,
+              current.environmentId,
+              `test-profile:${current.id}:authentication`,
+            ),
+          ) as ProfileAuthentication;
+        } catch {
+          throw new ConflictError(
+            `${current.name} authentication is unreadable. Refresh the test profile session and try again.`,
+          );
+        }
+        await validateAuthentication(
+          current.environmentId,
+          current.mode,
+          authentication,
+        );
+        try {
+          if (authentication.storageState) {
+            await validateCapturedSession(
+              current.environmentId,
+              authentication,
+            );
+          } else if (current.mode === 'basic') {
+            throw new ConflictError(
+              'No captured session is saved. Capture the authenticated session first.',
+            );
+          }
+        } catch (error) {
+          await repository.updateProfile(current.id, {
+            authenticationStatus:
+              error instanceof ConflictError &&
+              error.message.includes('has expired')
+                ? 'expired'
+                : 'needs_verification',
+            verifiedAt: new Date(),
+          });
+          throw error;
+        }
+      } else if (
+        current.mode !== 'advanced' ||
+        (!current.cookies.length && !current.headers.length)
+      ) {
+        throw new ConflictError(
+          'No authentication is configured. Capture a signed-in session first.',
+        );
+      }
+
+      const profile = await repository.updateProfile(current.id, {
+        authenticationStatus: 'ready',
+        verifiedAt: new Date(),
+      });
+      if (!profile) throw new AppError('NOT_FOUND', 'Test profile not found');
+      return publicProfile({
+        ...profile,
         variables: current.variables,
         cookies: current.cookies,
         headers: current.headers,

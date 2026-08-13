@@ -358,7 +358,7 @@ const profileStorageCookieSchema = z.object({
   sameSite: z.enum(['Strict', 'Lax', 'None']),
 });
 
-const profileStorageStateSchema = z.object({
+export const profileStorageStateSchema = z.object({
   cookies: z.array(profileStorageCookieSchema).max(500).default([]),
   origins: z
     .array(
@@ -456,6 +456,10 @@ export const updateEnvironmentProfileInputSchema = profileFields
 export const captureEnvironmentProfileSessionInputSchema = z.object({
   id: z.number().int().positive(),
   storageState: profileStorageStateSchema,
+});
+
+export const verifyEnvironmentProfileInputSchema = z.object({
+  id: z.number().int().positive(),
 });
 
 export const environmentProfileIdInputSchema = z.object({
@@ -574,7 +578,11 @@ export type UpdateEnvironmentProfileInput = z.infer<
   typeof updateEnvironmentProfileInputSchema
 >;
 export type ProfileAuthentication = z.infer<typeof profileAuthenticationSchema>;
+export type ProfileStorageState = z.infer<typeof profileStorageStateSchema>;
 export type TestStartingState = z.infer<typeof testStartingStateSchema>;
 export type CaptureEnvironmentProfileSessionInput = z.infer<
   typeof captureEnvironmentProfileSessionInputSchema
+>;
+export type VerifyEnvironmentProfileInput = z.infer<
+  typeof verifyEnvironmentProfileInputSchema
 >;

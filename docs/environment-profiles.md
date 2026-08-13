@@ -14,6 +14,14 @@ sign-in. **Advanced** additionally supports direct cookies and request headers;
 headers are applied only to the configured environment's exact origin and are
 reevaluated after every redirect.
 
+To make a Basic profile ready, choose **Capture session** in Test profiles. Run
+the shown Playwright `codegen --save-storage` command on a trusted machine,
+complete sign-in in the controlled browser, close it, and import the generated
+JSON file. Probe encrypts the state immediately. Then choose **Verify access**;
+Probe checks that the state has applicable, unexpired cookies or origin-scoped
+local storage for the selected environment before marking the profile Ready.
+Use **Refresh session** to replace an expired capture.
+
 Profiles expose only safe metadata: name, role description, mode, status,
 revision, and capture/verification timestamps. Authentication status is
 `Ready`, `Needs verification`, or `Expired`. Guest is always ready and contains

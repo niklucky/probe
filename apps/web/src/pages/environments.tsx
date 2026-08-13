@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ProfileStorageState } from '@probe/shared/schemas/environments';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -8,8 +9,10 @@ import {
   Edit,
   KeyRound,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
@@ -83,6 +86,26 @@ const emptyProfileForm = {
   headerIds: [] as number[],
 };
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function capturedStorageState(value: unknown): ProfileStorageState {
+  if (!value || typeof value !== 'object') {
+    throw new Error('The selected file is not Playwright storage state');
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.cookies) || !Array.isArray(candidate.origins)) {
+    throw new Error(
+      'Playwright storage state must contain cookies and origins arrays',
+    );
+  }
+  // The server performs the complete bounded schema validation before any
+  // value is encrypted. This browser-side check only gives immediate feedback
+  // for files that are clearly not Playwright storage state.
+  return value as ProfileStorageState;
+}
+
 function formatDateTimeLocal(value: string | Date) {
   const date = new Date(value);
   const pad = (part: number) => String(part).padStart(2, '0');
@@ -135,6 +158,11 @@ export function EnvironmentsPage() {
     useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [profileError, setProfileError] = useState('');
+  const [capturingProfile, setCapturingProfile] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [captureError, setCaptureError] = useState('');
   const input = { productId };
 
   const { data: product } = trpc.products.get.useQuery({ id: productId });
@@ -294,6 +322,47 @@ export function EnvironmentsPage() {
     onSuccess: refreshProfiles,
     onError: (error) => setProfileError(error.message),
   });
+  const captureProfileSession =
+    trpc.environments.captureProfileSession.useMutation({
+      onSuccess: () => {
+        refreshProfiles();
+        setCapturingProfile(null);
+        setCaptureError('');
+      },
+      onError: (error) => setCaptureError(error.message),
+    });
+  const verifyProfile = trpc.environments.verifyProfile.useMutation({
+    onSuccess: () => {
+      refreshProfiles();
+      setProfileError('');
+    },
+    onError: (error) => setProfileError(error.message),
+  });
+
+  const importCapturedSession = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !capturingProfile) return;
+    setCaptureError('');
+    try {
+      if (file.size > 5_000_000) {
+        throw new Error('The storage-state file must be smaller than 5 MB');
+      }
+      const storageState = capturedStorageState(JSON.parse(await file.text()));
+      captureProfileSession.mutate({
+        id: capturingProfile.id,
+        storageState,
+      });
+    } catch (error) {
+      setCaptureError(
+        error instanceof Error
+          ? error.message
+          : 'The selected file is not valid Playwright storage state',
+      );
+    }
+  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -916,7 +985,45 @@ export function EnvironmentsPage() {
                       : 'never'}
                   </p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap justify-end gap-1">
+                  {!profile.isAnonymous && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCapturingProfile({
+                            id: profile.id,
+                            name: profile.name,
+                          });
+                          setCaptureError('');
+                        }}
+                      >
+                        {profile.hasStorageState ? (
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {profile.hasStorageState
+                          ? 'Refresh session'
+                          : 'Capture session'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          verifyProfile.isPending ||
+                          (!profile.hasStorageState && profile.mode === 'basic')
+                        }
+                        onClick={() => verifyProfile.mutate({ id: profile.id })}
+                      >
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        Verify access
+                      </Button>
+                    </>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -951,6 +1058,70 @@ export function EnvironmentsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={capturingProfile !== null}
+        onOpenChange={(open) => {
+          if (!open && !captureProfileSession.isPending) {
+            setCapturingProfile(null);
+            setCaptureError('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Capture {capturingProfile?.name} authenticated session
+            </DialogTitle>
+            <DialogDescription>
+              Sign in through Playwright&apos;s controlled browser, close it,
+              then import the generated storage-state file. Probe encrypts the
+              state immediately and never displays its saved values.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <ol className="list-decimal space-y-2 pl-5 text-sm">
+              <li>Run this command on a trusted machine with Playwright.</li>
+              <li>Complete sign-in in the browser window that opens.</li>
+              <li>Close the browser, then select the generated JSON file.</li>
+            </ol>
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
+              <code>
+                {profilesEnvironment
+                  ? `npx playwright codegen --save-storage=probe-session.json ${shellQuote(
+                      (environments ?? []).find(
+                        ({ id }) => id === profilesEnvironment.id,
+                      )?.baseUrl ?? '',
+                    )}`
+                  : ''}
+              </code>
+            </pre>
+            <div className="rounded-md border p-3 text-xs text-muted-foreground">
+              The saved session keeps its real server and token lifetime.
+              Capturing it does not extend expiration.
+            </div>
+            <Label className="grid cursor-pointer gap-2 rounded-md border border-dashed p-5 text-center hover:bg-muted/50">
+              <Upload className="mx-auto h-5 w-5" />
+              <span>
+                {captureProfileSession.isPending
+                  ? 'Encrypting session…'
+                  : 'Select probe-session.json'}
+              </span>
+              <Input
+                className="sr-only"
+                type="file"
+                accept="application/json,.json"
+                disabled={captureProfileSession.isPending}
+                onChange={importCapturedSession}
+              />
+            </Label>
+            {captureError && (
+              <p className="text-sm text-destructive">{captureError}</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

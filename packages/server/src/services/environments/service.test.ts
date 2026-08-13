@@ -235,7 +235,11 @@ function fixture(
       if (!profile) return undefined;
       Object.assign(profile, values, {
         revision:
-          bindings !== undefined || values.name !== undefined
+          bindings !== undefined ||
+          values.name !== undefined ||
+          values.description !== undefined ||
+          values.mode !== undefined ||
+          values.encryptedAuthentication !== undefined
             ? profile.revision + 1
             : profile.revision,
         updatedAt: new Date(),
@@ -869,6 +873,126 @@ describe('environment profile service', () => {
     const { service } = fixture({ denyAuthorization: true });
     await expect(service.listProfiles(7, 9)).rejects.toMatchObject({
       code: 'NOT_FOUND',
+    });
+  });
+
+  test('captures encrypted browser state and verifies only state for the environment', async () => {
+    const { service, profiles } = fixture();
+    const profile = await service.createProfile(
+      {
+        environmentId: 7,
+        name: 'Manager',
+        mode: 'basic',
+        enabled: true,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+
+    const captured = await service.captureProfileSession(
+      {
+        id: profile.id,
+        storageState: {
+          cookies: [
+            {
+              name: 'session',
+              value: 'manager-secret-session',
+              domain: 'staging.example.test',
+              path: '/',
+              httpOnly: true,
+              secure: true,
+              sameSite: 'Lax',
+            },
+          ],
+          origins: [],
+        },
+      },
+      3,
+    );
+    expect(captured).toMatchObject({
+      authenticationStatus: 'needs_verification',
+      hasStorageState: true,
+    });
+    expect(JSON.stringify(profiles)).not.toContain('manager-secret-session');
+
+    await expect(
+      service.verifyProfile({ id: profile.id }, 3),
+    ).resolves.toMatchObject({
+      authenticationStatus: 'ready',
+      hasStorageState: true,
+    });
+  });
+
+  test('rejects empty, unrelated, and expired captured sessions', async () => {
+    const { service } = fixture();
+    const profile = await service.createProfile(
+      {
+        environmentId: 7,
+        name: 'Manager',
+        mode: 'basic',
+        enabled: true,
+        variableIds: [],
+        cookieIds: [],
+        headerIds: [],
+      },
+      3,
+    );
+
+    await expect(service.verifyProfile({ id: profile.id }, 3)).rejects.toThrow(
+      'Capture a signed-in session',
+    );
+    await service.captureProfileSession(
+      {
+        id: profile.id,
+        storageState: {
+          cookies: [
+            {
+              name: 'session',
+              value: 'other-origin',
+              domain: 'other.example.test',
+              path: '/',
+              httpOnly: true,
+              secure: true,
+              sameSite: 'Lax',
+            },
+          ],
+          origins: [],
+        },
+      },
+      3,
+    );
+    await expect(service.verifyProfile({ id: profile.id }, 3)).rejects.toThrow(
+      'contains no cookies or local storage',
+    );
+
+    await service.captureProfileSession(
+      {
+        id: profile.id,
+        storageState: {
+          cookies: [
+            {
+              name: 'session',
+              value: 'expired',
+              domain: 'staging.example.test',
+              path: '/',
+              expires: 1,
+              httpOnly: true,
+              secure: true,
+              sameSite: 'Lax',
+            },
+          ],
+          origins: [],
+        },
+      },
+      3,
+    );
+    await expect(service.verifyProfile({ id: profile.id }, 3)).rejects.toThrow(
+      'has expired',
+    );
+    await expect(service.getProfile(profile.id, 3)).resolves.toMatchObject({
+      authenticationStatus: 'expired',
     });
   });
 });
