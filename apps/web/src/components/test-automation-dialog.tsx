@@ -213,6 +213,13 @@ export function TestAutomationDialog({
     },
     onError: (requestError) => setError(requestError.message),
   });
+  const runProposal = trpc.automationExecutions.queue.useMutation({
+    onSuccess: ({ automationId }) => {
+      setError("");
+      utils.automationExecutions.list.invalidate({ automationId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
   const discard = trpc.testAutomations.discard.useMutation({
     onSuccess: () => {
       setProposalId(null);
@@ -287,6 +294,7 @@ export function TestAutomationDialog({
   const busy =
     generate.isPending ||
     accept.isPending ||
+    runProposal.isPending ||
     discard.isPending ||
     markSourceReady.isPending ||
     startBrowserAuthoring.isPending ||
@@ -318,6 +326,32 @@ export function TestAutomationDialog({
       startingState,
       connectionId: selectedConnection,
     });
+  };
+
+  const acceptAndRun = () => {
+    if (!proposalId || !source.trim()) return;
+    setError("");
+    accept.mutate(
+      { id: proposalId, source },
+      {
+        onSuccess: (automation) => {
+          if (!automation.environmentProfileId) {
+            setError(
+              "Automation has no test profile; regenerate it before running.",
+            );
+            return;
+          }
+          runProposal.mutate({
+            automationId: automation.id,
+            environmentProfileId: automation.environmentProfileId,
+            timeoutSeconds: 300,
+            captureVideo: false,
+            applyEnvironmentCookies: true,
+            applyEnvironmentHeaders: true,
+          });
+        },
+      },
+    );
   };
 
   const manualTestDirty =
@@ -577,7 +611,7 @@ export function TestAutomationDialog({
                   onChange={(event) => setSource(event.target.value)}
                   spellCheck={false}
                 />
-                <div className="flex flex-wrap justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -587,30 +621,51 @@ export function TestAutomationDialog({
                     <Trash2 className="mr-2 h-4 w-4" />
                     Discard
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      busy ||
-                      manualTestDirty ||
-                      !environmentId ||
-                      !environmentProfileId ||
-                      !isSourceReady
-                    }
-                    onClick={() => requestGeneration()}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Regenerate
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={busy || !source.trim()}
-                    onClick={() => accept.mutate({ id: proposalId, source })}
-                  >
-                    <Check className="mr-2 h-4 w-4" />
-                    Accept
-                  </Button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={
+                        busy ||
+                        manualTestDirty ||
+                        !environmentId ||
+                        !environmentProfileId ||
+                        !isSourceReady
+                      }
+                      onClick={() => requestGeneration()}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Regenerate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy || !source.trim()}
+                      onClick={() =>
+                        accept.mutate({ id: proposalId, source })
+                      }
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      Accept
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy || !source.trim()}
+                      onClick={acceptAndRun}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      {accept.isPending
+                        ? "Accepting…"
+                        : runProposal.isPending
+                          ? "Queuing…"
+                          : "Run test"}
+                    </Button>
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Run test accepts the current source and queues it with the
+                  captured test profile. Use execution history to run it again.
+                </p>
               </div>
             ) : (
               <Button
@@ -1201,7 +1256,7 @@ function AutomationExecutionHistory({
             }
           >
             <Play className="mr-2 h-4 w-4" />
-            {queue.isPending ? "Queuing…" : "Run accepted version"}
+            {queue.isPending ? "Queuing…" : "Run test"}
           </Button>
         </div>
       </div>
