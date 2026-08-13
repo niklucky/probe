@@ -350,8 +350,9 @@ export const environmentHeaders = pgTable(
   }),
 );
 
-// Authentication state is opt-in and profile-scoped. Profiles reference
-// encrypted variables and templated browser bindings; they never copy values.
+// Test profiles describe browser identity and starting authentication state.
+// Authentication material is one authenticated-encryption envelope bound to
+// the environment and profile; API reads must never expose it.
 export const environmentProfiles = pgTable(
   'environment_profiles',
   {
@@ -360,6 +361,22 @@ export const environmentProfiles = pgTable(
       .references(() => environments.id, { onDelete: 'cascade' })
       .notNull(),
     name: varchar('name', { length: 255 }).notNull(),
+    description: varchar('description', { length: 1000 }),
+    mode: varchar('mode', {
+      length: 16,
+      enum: ['basic', 'advanced'],
+    })
+      .notNull()
+      .default('basic'),
+    authenticationStatus: varchar('authentication_status', {
+      length: 32,
+      enum: ['ready', 'needs_verification', 'expired'],
+    })
+      .notNull()
+      .default('needs_verification'),
+    encryptedAuthentication: text('encrypted_authentication'),
+    capturedAt: timestamp('captured_at'),
+    verifiedAt: timestamp('verified_at'),
     isAnonymous: boolean('is_anonymous').notNull().default(false),
     enabled: boolean('enabled').notNull().default(true),
     revision: integer('revision').notNull().default(1),
@@ -666,6 +683,21 @@ export const testCaseVersions = pgTable(
     priority: testPriorityEnum('priority').notNull().default('medium'),
     status: testStatusEnum('status').notNull().default('draft'),
     tags: jsonb('tags').$type<string[]>().notNull().default([]),
+    environmentId: integer('environment_id').references(() => environments.id, {
+      onDelete: 'restrict',
+    }),
+    environmentProfileId: integer('environment_profile_id').references(
+      () => environmentProfiles.id,
+      { onDelete: 'restrict' },
+    ),
+    environmentProfileName: varchar('environment_profile_name', {
+      length: 255,
+    }),
+    environmentProfileRevision: integer('environment_profile_revision'),
+    startingState: varchar('starting_state', {
+      length: 32,
+      enum: ['profile_authentication', 'signed_out'],
+    }),
     createdById: integer('created_by_id')
       .references(() => users.id)
       .notNull(),
@@ -750,6 +782,12 @@ export const testAutomations = pgTable(
       length: 255,
     }),
     environmentProfileRevision: integer('environment_profile_revision'),
+    startingState: varchar('starting_state', {
+      length: 32,
+      enum: ['profile_authentication', 'signed_out'],
+    })
+      .notNull()
+      .default('profile_authentication'),
     versionNumber: integer('version_number').notNull(),
     framework: automationFrameworkEnum('framework')
       .notNull()
@@ -817,6 +855,12 @@ export const automationExecutionJobs = pgTable(
       length: 255,
     }),
     environmentProfileRevision: integer('environment_profile_revision'),
+    startingState: varchar('starting_state', {
+      length: 32,
+      enum: ['profile_authentication', 'signed_out'],
+    })
+      .notNull()
+      .default('profile_authentication'),
     status: automationExecutionStatusEnum('status').notNull().default('queued'),
     requestedById: integer('requested_by_id')
       .references(() => users.id)
@@ -828,6 +872,7 @@ export const automationExecutionJobs = pgTable(
     settings: jsonb('settings')
       .$type<{
         browser: 'chromium';
+        captureDiagnostics?: boolean;
         captureVideo: boolean;
         applyEnvironmentCookies: boolean;
         applyEnvironmentHeaders: boolean;
@@ -923,6 +968,12 @@ export const browserAuthoringSessions = pgTable(
     environmentProfileRevision: integer(
       'environment_profile_revision',
     ).notNull(),
+    startingState: varchar('starting_state', {
+      length: 32,
+      enum: ['profile_authentication', 'signed_out'],
+    })
+      .notNull()
+      .default('profile_authentication'),
     connectionRef: varchar('connection_ref', { length: 255 }),
     status: browserAuthoringStatusEnum('status').notNull().default('queued'),
     phase: browserAuthoringPhaseEnum('phase')

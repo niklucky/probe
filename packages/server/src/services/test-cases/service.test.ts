@@ -51,6 +51,11 @@ describe('test case service', () => {
           priority: values.priority ?? 'medium',
           status: values.status ?? 'draft',
           tags: values.tags ?? [],
+          environmentId: values.environmentId ?? null,
+          environmentProfileId: values.environmentProfileId ?? null,
+          environmentProfileName: values.environmentProfileName ?? null,
+          environmentProfileRevision: values.environmentProfileRevision ?? null,
+          startingState: values.startingState ?? null,
           createdById: values.createdById,
           createdAt: new Date(),
         };

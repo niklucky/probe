@@ -1,6 +1,6 @@
 import type { TestSpec } from '@probe/shared/schemas/test-cases';
 
-export const TEST_CASE_PROMPT_VERSION = 'test-case-authoring-v1';
+export const TEST_CASE_PROMPT_VERSION = 'test-case-authoring-v2';
 
 export const testSpecJsonSchema = {
   type: 'object',
@@ -54,6 +54,11 @@ export const authoringSystemPrompt =
 export function generationPrompt(
   description: string,
   environment?: { name: string; type: string; baseUrl: string },
+  profile?: {
+    name: string;
+    description: string | null;
+    startingState: 'profile_authentication' | 'signed_out';
+  },
 ) {
   return [
     `Create a complete, precise manual test case from this description:\n\n${description}`,
@@ -61,6 +66,9 @@ export function generationPrompt(
       ? `Target environment (use as context; do not invent credentials):\n${JSON.stringify(
           environment,
         )}`
+      : '',
+    profile
+      ? `Safe test-profile context (authentication material is injected outside the test and intentionally omitted):\n${JSON.stringify(profile)}\n${profile.startingState === 'profile_authentication' ? `Add the prerequisite "Browser is authenticated using the ${profile.name} test profile." Do not add login steps unless authentication itself is under test.` : 'The browser starts signed out. Do not assume an authenticated session.'}`
       : '',
   ]
     .filter(Boolean)
@@ -71,6 +79,11 @@ export function improvementPrompt(
   spec: TestSpec,
   instruction?: string,
   environment?: { name: string; type: string; baseUrl: string },
+  profile?: {
+    name: string;
+    description: string | null;
+    startingState: 'profile_authentication' | 'signed_out';
+  },
 ) {
   return [
     'Improve the following test case while preserving its intent.',
@@ -79,6 +92,9 @@ export function improvementPrompt(
       ? `Target environment (use as context; do not invent credentials):\n${JSON.stringify(
           environment,
         )}`
+      : '',
+    profile
+      ? `Safe test-profile context (secrets intentionally omitted):\n${JSON.stringify(profile)}\n${profile.startingState === 'profile_authentication' ? `Preserve or add the prerequisite "Browser is authenticated using the ${profile.name} test profile." Do not add login steps unless authentication itself is under test.` : 'The browser starts signed out.'}`
       : '',
     `Current test case:\n${JSON.stringify(spec)}`,
   ]

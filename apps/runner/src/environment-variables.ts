@@ -6,6 +6,8 @@ import {
   extractEnvironmentVariableReferences,
   resolveEnvironmentTemplate,
   validateEnvironmentCookieDomain,
+  profileAuthenticationSchema,
+  type ProfileAuthentication,
 } from '@probe/shared/schemas/environments';
 
 export interface StoredEnvironmentVariable {
@@ -61,6 +63,77 @@ export interface RuntimeHeader {
   name: string;
   value: string;
   origin: string;
+}
+
+export function decryptProfileAuthentication(
+  encryptedAuthentication: string | null,
+  environmentId: number,
+  profileId: number,
+  masterKeyValue: string,
+): ProfileAuthentication | undefined {
+  if (!encryptedAuthentication) return undefined;
+  try {
+    return profileAuthenticationSchema.parse(
+      JSON.parse(
+        decryptEnvironmentVariable(
+          encryptedAuthentication,
+          environmentId,
+          `test-profile:${profileId}:authentication`,
+          masterKeyValue,
+        ),
+      ),
+    );
+  } catch {
+    throw new RuntimeEnvironmentError(
+      'ENVIRONMENT_VARIABLE_DECRYPTION_FAILED',
+      'Test profile authentication is unreadable. Refresh the test profile before running this test.',
+    );
+  }
+}
+
+export function runtimeProfileAuthentication(
+  authentication: ProfileAuthentication | undefined,
+  baseUrl: string,
+  now = Date.now() / 1000,
+) {
+  if (!authentication)
+    return { storageState: undefined, cookies: [], headers: [] };
+  const baseOrigin = new URL(baseUrl).origin;
+  const expired = [
+    ...(authentication.storageState?.cookies ?? []),
+    ...authentication.cookies,
+  ].some(
+    ({ expires }) =>
+      typeof expires === 'number' && expires > 0 && expires <= now,
+  );
+  if (expired) {
+    throw new RuntimeEnvironmentError(
+      'INVALID_ENVIRONMENT_COOKIES',
+      'Test profile authentication has expired. Refresh the test profile before running this test.',
+    );
+  }
+  const storageState = authentication.storageState
+    ? {
+        cookies: authentication.storageState.cookies,
+        origins: authentication.storageState.origins.filter(
+          ({ origin }) => origin === baseOrigin,
+        ),
+      }
+    : undefined;
+  const cookies = authentication.cookies.map((cookie) => ({
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain,
+    path: cookie.path,
+    httpOnly: cookie.httpOnly,
+    secure: cookie.secure,
+    sameSite: cookie.sameSite,
+    ...(typeof cookie.expires === 'number' ? { expires: cookie.expires } : {}),
+  }));
+  const headers = authentication.headers.filter(
+    ({ origin }) => origin === baseOrigin,
+  );
+  return { storageState, cookies, headers };
 }
 
 export function cookieVariableReferences(cookies: StoredEnvironmentCookie[]) {

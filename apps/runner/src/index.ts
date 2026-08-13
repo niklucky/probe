@@ -12,6 +12,8 @@ import {
 import {
   cookieVariableReferences,
   headerVariableReferences,
+  decryptProfileAuthentication,
+  runtimeProfileAuthentication,
   resolveRuntimeEnvironment,
   resolveRuntimeCookies,
   resolveRuntimeHeaders,
@@ -97,11 +99,13 @@ async function runClaimedJob(jobId: number) {
   try {
     const cookieDefinitions =
       !payload.environmentProfile!.isAnonymous &&
+      payload.startingState === 'profile_authentication' &&
       payload.settings.applyEnvironmentCookies
         ? await repository.listEnvironmentCookies(payload.environmentProfileId!)
         : [];
     const headerDefinitions =
       !payload.environmentProfile!.isAnonymous &&
+      payload.startingState === 'profile_authentication' &&
       payload.settings.applyEnvironmentHeaders
         ? await repository.listEnvironmentHeaders(payload.environmentProfileId!)
         : [];
@@ -133,6 +137,18 @@ async function runClaimedJob(jobId: number) {
       payload.environmentId,
       runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
     );
+    const profileAuthentication =
+      payload.startingState === 'profile_authentication'
+        ? runtimeProfileAuthentication(
+            decryptProfileAuthentication(
+              payload.environmentProfile!.encryptedAuthentication,
+              payload.environmentId,
+              payload.environmentProfileId!,
+              runnerConfig.ENVIRONMENT_VARIABLES_MASTER_KEY,
+            ),
+            payload.environment.baseUrl,
+          )
+        : { storageState: undefined, cookies: [], headers: [] };
     runtimeEnvironment = {
       ...resolvedEnvironment,
       // Cookie-backed values are sensitive at runtime even if their variable
@@ -142,15 +158,19 @@ async function runClaimedJob(jobId: number) {
         cookieReferences,
         headerReferences,
       ),
-      cookies: resolveRuntimeCookies(
-        cookieDefinitions,
-        payload.environment.baseUrl,
-        resolvedEnvironment.values,
-      ),
-      headers: resolveRuntimeHeaders(
-        headerDefinitions,
-        resolvedEnvironment.values,
-      ),
+      cookies: [
+        ...resolveRuntimeCookies(
+          cookieDefinitions,
+          payload.environment.baseUrl,
+          resolvedEnvironment.values,
+        ),
+        ...profileAuthentication.cookies,
+      ],
+      headers: [
+        ...resolveRuntimeHeaders(headerDefinitions, resolvedEnvironment.values),
+        ...profileAuthentication.headers,
+      ],
+      storageState: profileAuthentication.storageState,
     };
   } catch (error) {
     if (!(error instanceof RuntimeEnvironmentError)) {

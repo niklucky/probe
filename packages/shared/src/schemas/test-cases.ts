@@ -1,6 +1,7 @@
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
 import { testCases, testCaseVersions } from '@probe/db';
 import { z } from 'zod';
+import { testStartingStateSchema } from './environments';
 
 const testCaseInsertSchema = createInsertSchema(testCases);
 const testCaseVersionInsertSchema = createInsertSchema(testCaseVersions);
@@ -52,6 +53,11 @@ export const testCaseVersionSchema = createSelectSchema(testCaseVersions)
     priority: true,
     status: true,
     tags: true,
+    environmentId: true,
+    environmentProfileId: true,
+    environmentProfileName: true,
+    environmentProfileRevision: true,
+    startingState: true,
     createdById: true,
     createdAt: true,
   })
@@ -95,10 +101,20 @@ export const listTestCasesByProductInputSchema = z.object({
   productId: z.number().int().positive(),
 });
 
-export const createTestCaseInputSchema = testSpecSchema.extend({
-  suiteId: testCaseInsertSchema.shape.suiteId,
-  status: z.enum(['draft', 'ready', 'deprecated']).default('draft'),
+const testProfileContextSchema = z.object({
+  environmentId: z.number().int().positive().nullable().optional(),
+  environmentProfileId: z.number().int().positive().nullable().optional(),
+  environmentProfileName: z.string().max(255).nullable().optional(),
+  environmentProfileRevision: z.number().int().positive().nullable().optional(),
+  startingState: testStartingStateSchema.nullable().optional(),
 });
+
+export const createTestCaseInputSchema = testSpecSchema
+  .extend({
+    suiteId: testCaseInsertSchema.shape.suiteId,
+    status: z.enum(['draft', 'ready', 'deprecated']).default('draft'),
+  })
+  .and(testProfileContextSchema);
 
 export const getTestCaseInputSchema = z.object({
   id: z.number().int().positive(),
@@ -110,7 +126,8 @@ export const updateTestCaseInputSchema = testSpecSchema
   .partial()
   .extend({
     id: z.number().int().positive(),
-  });
+  })
+  .and(testProfileContextSchema);
 
 export const getTestCaseVersionsInputSchema = z.object({
   testCaseId: testCaseVersionInsertSchema.shape.testCaseId,

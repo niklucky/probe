@@ -342,11 +342,74 @@ const profileBindingIdsSchema = z
     message: 'Profile binding IDs must be unique',
   });
 
+export const testStartingStateSchema = z.enum([
+  'profile_authentication',
+  'signed_out',
+]);
+
+const profileStorageCookieSchema = z.object({
+  name: environmentCookieNameSchema,
+  value: z.string().max(16_384),
+  domain: z.string().trim().min(1).max(255),
+  path: cookiePathSchema,
+  expires: z.number().finite().optional(),
+  httpOnly: z.boolean(),
+  secure: z.boolean(),
+  sameSite: z.enum(['Strict', 'Lax', 'None']),
+});
+
+export const profileStorageStateSchema = z.object({
+  cookies: z.array(profileStorageCookieSchema).max(500).default([]),
+  origins: z
+    .array(
+      z.object({
+        origin: environmentHeaderOriginSchema,
+        localStorage: z
+          .array(
+            z.object({
+              name: z.string().max(1_000),
+              value: z.string().max(100_000),
+            }),
+          )
+          .max(2_000),
+      }),
+    )
+    .max(100)
+    .default([]),
+});
+
+const advancedProfileCookieSchema = profileStorageCookieSchema.extend({
+  expires: z.number().finite().nullable().optional(),
+});
+
+const advancedProfileHeaderSchema = z.object({
+  name: environmentHeaderNameSchema,
+  value: z.string().min(1).max(16_384),
+  origin: environmentHeaderOriginSchema,
+});
+
+export const profileAuthenticationSchema = z.object({
+  storageState: profileStorageStateSchema.optional(),
+  credentials: z
+    .object({
+      username: z.string().max(2_000),
+      password: z.string().max(10_000),
+    })
+    .optional(),
+  cookies: z.array(advancedProfileCookieSchema).max(500).default([]),
+  headers: z.array(advancedProfileHeaderSchema).max(200).default([]),
+});
+
 export const environmentProfileSchema = createSelectSchema(environmentProfiles)
   .pick({
     id: true,
     environmentId: true,
     name: true,
+    description: true,
+    mode: true,
+    authenticationStatus: true,
+    capturedAt: true,
+    verifiedAt: true,
     isAnonymous: true,
     enabled: true,
     revision: true,
@@ -358,6 +421,10 @@ export const environmentProfileSchema = createSelectSchema(environmentProfiles)
     variableIds: profileBindingIdsSchema,
     cookieIds: profileBindingIdsSchema,
     headerIds: profileBindingIdsSchema,
+    hasStorageState: z.boolean(),
+    hasCredentials: z.boolean(),
+    advancedCookieCount: z.number().int().nonnegative(),
+    advancedHeaderCount: z.number().int().nonnegative(),
   });
 
 export const listEnvironmentProfilesInputSchema = z.object({
@@ -366,6 +433,8 @@ export const listEnvironmentProfilesInputSchema = z.object({
 
 const profileFields = z.object({
   name: z.string().trim().min(1).max(255),
+  description: z.string().trim().max(1_000).nullable().optional(),
+  mode: z.enum(['basic', 'advanced']).optional(),
   enabled: z.boolean().default(true),
   variableIds: profileBindingIdsSchema.default([]),
   cookieIds: profileBindingIdsSchema.default([]),
@@ -374,11 +443,24 @@ const profileFields = z.object({
 
 export const createEnvironmentProfileInputSchema = profileFields.extend({
   environmentId: z.number().int().positive(),
+  authentication: profileAuthenticationSchema.optional(),
 });
 
 export const updateEnvironmentProfileInputSchema = profileFields
   .partial()
-  .extend({ id: z.number().int().positive() });
+  .extend({
+    id: z.number().int().positive(),
+    authentication: profileAuthenticationSchema.nullable().optional(),
+  });
+
+export const captureEnvironmentProfileSessionInputSchema = z.object({
+  id: z.number().int().positive(),
+  storageState: profileStorageStateSchema,
+});
+
+export const verifyEnvironmentProfileInputSchema = z.object({
+  id: z.number().int().positive(),
+});
 
 export const environmentProfileIdInputSchema = z.object({
   id: z.number().int().positive(),
@@ -494,4 +576,13 @@ export type CreateEnvironmentProfileInput = z.infer<
 >;
 export type UpdateEnvironmentProfileInput = z.infer<
   typeof updateEnvironmentProfileInputSchema
+>;
+export type ProfileAuthentication = z.infer<typeof profileAuthenticationSchema>;
+export type ProfileStorageState = z.infer<typeof profileStorageStateSchema>;
+export type TestStartingState = z.infer<typeof testStartingStateSchema>;
+export type CaptureEnvironmentProfileSessionInput = z.infer<
+  typeof captureEnvironmentProfileSessionInputSchema
+>;
+export type VerifyEnvironmentProfileInput = z.infer<
+  typeof verifyEnvironmentProfileInputSchema
 >;

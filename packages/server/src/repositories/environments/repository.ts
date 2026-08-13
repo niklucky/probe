@@ -138,7 +138,12 @@ function bindEnvironmentRepository(database: Database) {
           );
         }
       }
-      const bumpsRevision = bindings !== undefined || values.name !== undefined;
+      const bumpsRevision =
+        bindings !== undefined ||
+        values.name !== undefined ||
+        values.description !== undefined ||
+        values.mode !== undefined ||
+        values.encryptedAuthentication !== undefined;
       const [profile] = await database
         .update(environmentProfiles)
         .set({

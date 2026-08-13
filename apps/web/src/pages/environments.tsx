@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ProfileStorageState } from '@probe/shared/schemas/environments';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -8,8 +9,10 @@ import {
   Edit,
   KeyRound,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
@@ -75,11 +78,33 @@ const emptyHeaderForm = (origin = '') => ({
 
 const emptyProfileForm = {
   name: '',
+  description: '',
+  mode: 'basic' as 'basic' | 'advanced',
   enabled: true,
   variableIds: [] as number[],
   cookieIds: [] as number[],
   headerIds: [] as number[],
 };
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function capturedStorageState(value: unknown): ProfileStorageState {
+  if (!value || typeof value !== 'object') {
+    throw new Error('The selected file is not Playwright storage state');
+  }
+  const candidate = value as Record<string, unknown>;
+  if (!Array.isArray(candidate.cookies) || !Array.isArray(candidate.origins)) {
+    throw new Error(
+      'Playwright storage state must contain cookies and origins arrays',
+    );
+  }
+  // The server performs the complete bounded schema validation before any
+  // value is encrypted. This browser-side check only gives immediate feedback
+  // for files that are clearly not Playwright storage state.
+  return value as ProfileStorageState;
+}
 
 function formatDateTimeLocal(value: string | Date) {
   const date = new Date(value);
@@ -133,6 +158,11 @@ export function EnvironmentsPage() {
     useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [profileError, setProfileError] = useState('');
+  const [capturingProfile, setCapturingProfile] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [captureError, setCaptureError] = useState('');
   const input = { productId };
 
   const { data: product } = trpc.products.get.useQuery({ id: productId });
@@ -292,6 +322,47 @@ export function EnvironmentsPage() {
     onSuccess: refreshProfiles,
     onError: (error) => setProfileError(error.message),
   });
+  const captureProfileSession =
+    trpc.environments.captureProfileSession.useMutation({
+      onSuccess: () => {
+        refreshProfiles();
+        setCapturingProfile(null);
+        setCaptureError('');
+      },
+      onError: (error) => setCaptureError(error.message),
+    });
+  const verifyProfile = trpc.environments.verifyProfile.useMutation({
+    onSuccess: () => {
+      refreshProfiles();
+      setProfileError('');
+    },
+    onError: (error) => setProfileError(error.message),
+  });
+
+  const importCapturedSession = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !capturingProfile) return;
+    setCaptureError('');
+    try {
+      if (file.size > 5_000_000) {
+        throw new Error('The storage-state file must be smaller than 5 MB');
+      }
+      const storageState = capturedStorageState(JSON.parse(await file.text()));
+      captureProfileSession.mutate({
+        id: capturingProfile.id,
+        storageState,
+      });
+    } catch (error) {
+      setCaptureError(
+        error instanceof Error
+          ? error.message
+          : 'The selected file is not valid Playwright storage state',
+      );
+    }
+  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -611,55 +682,7 @@ export function EnvironmentsPage() {
                     }}
                   >
                     <ShieldCheck className="mr-2 h-4 w-4" />
-                    Profiles
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setVariablesEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                      });
-                      setEditingVariableId(null);
-                      setVariableForm(emptyVariableForm);
-                      setVariableError('');
-                    }}
-                  >
-                    <KeyRound className="mr-2 h-4 w-4" />
-                    Variables
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setCookiesEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                      });
-                      resetCookieEditor();
-                    }}
-                  >
-                    <Cookie className="mr-2 h-4 w-4" />
-                    Cookies
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const baseOrigin = new URL(environment.baseUrl).origin;
-                      setHeadersEnvironment({
-                        id: environment.id,
-                        name: environment.name,
-                        baseOrigin,
-                      });
-                      setEditingHeaderId(null);
-                      setHeaderForm(emptyHeaderForm(baseOrigin));
-                      setHeaderError('');
-                    }}
-                  >
-                    <Braces className="mr-2 h-4 w-4" />
-                    Headers
+                    Test profiles
                   </Button>
                 </div>
               </div>
@@ -695,11 +718,12 @@ export function EnvironmentsPage() {
       >
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{profilesEnvironment?.name} profiles</DialogTitle>
+            <DialogTitle>{profilesEnvironment?.name} test profiles</DialogTitle>
             <DialogDescription>
-              Profiles have no inheritance. Each authentication binding must be
-              selected explicitly. Anonymous may expose variables to test code
-              but never injects cookies or headers.
+              Test profiles describe a browser role and starting authentication
+              state. Guest is always unauthenticated. Advanced keeps the legacy
+              variable, cookie, and exact-origin header bindings available while
+              sessions are migrated to direct encrypted state.
             </DialogDescription>
           </DialogHeader>
 
@@ -733,64 +757,170 @@ export function EnvironmentsPage() {
               </div>
             </div>
 
-            {(
-              [
-                [
-                  'Variables',
-                  'variableIds',
-                  profileVariables,
-                  (item: (typeof profileVariables)[number]) => item.key,
-                ],
-                [
-                  'Cookies',
-                  'cookieIds',
-                  profileCookies,
-                  (item: (typeof profileCookies)[number]) => item.name,
-                ],
-                [
-                  'Headers',
-                  'headerIds',
-                  profileHeaders,
-                  (item: (typeof profileHeaders)[number]) =>
-                    `${item.name} · ${item.origin}`,
-                ],
-              ] as const
-            ).map(([title, field, items, labelFor]) => (
-              <div key={field} className="grid gap-2 rounded-md border p-3">
-                <div className="text-sm font-medium">{title}</div>
-                {items.length ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {items.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <Checkbox
-                          checked={profileForm[field].includes(item.id)}
-                          disabled={
-                            field !== 'variableIds' && editingProfileIsAnonymous
-                          }
-                          onCheckedChange={(checked) =>
-                            toggleProfileBinding(
-                              field,
-                              item.id,
-                              checked === true,
-                            )
-                          }
-                        />
-                        <span className="truncate">
-                          {labelFor(item as never)}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    No {title.toLowerCase()} configured.
-                  </p>
-                )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="profile-description">
+                  Role and intended use
+                </Label>
+                <Input
+                  id="profile-description"
+                  value={profileForm.description}
+                  onChange={(event) =>
+                    setProfileForm({
+                      ...profileForm,
+                      description: event.target.value,
+                    })
+                  }
+                  placeholder="Administrators with access to user management"
+                  disabled={editingProfileIsAnonymous}
+                />
               </div>
-            ))}
+              <div className="grid gap-2">
+                <Label htmlFor="profile-mode">Mode</Label>
+                <select
+                  id="profile-mode"
+                  className="flex h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={profileForm.mode}
+                  onChange={(event) =>
+                    setProfileForm({
+                      ...profileForm,
+                      mode: event.target.value as 'basic' | 'advanced',
+                    })
+                  }
+                  disabled={editingProfileIsAnonymous}
+                >
+                  <option value="basic">Basic — captured session</option>
+                  <option value="advanced">
+                    Advanced — cookies and headers
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            {profileForm.mode === 'advanced' && (
+              <div className="grid gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <p>
+                  Cookie expiration only controls browser storage. It cannot
+                  extend the server session or token lifetime. Legacy bindings
+                  remain available here only for migration compatibility.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      setVariablesEnvironment(profilesEnvironment);
+                      setProfilesEnvironment(null);
+                      setEditingVariableId(null);
+                      setVariableForm(emptyVariableForm);
+                    }}
+                  >
+                    <KeyRound className="mr-2 h-4 w-4" />
+                    Legacy variables
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      setCookiesEnvironment(profilesEnvironment);
+                      setProfilesEnvironment(null);
+                      resetCookieEditor();
+                    }}
+                  >
+                    <Cookie className="mr-2 h-4 w-4" />
+                    Legacy cookies
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (!profilesEnvironment) return;
+                      const environment = (environments ?? []).find(
+                        ({ id }) => id === profilesEnvironment.id,
+                      );
+                      if (!environment) return;
+                      const baseOrigin = new URL(environment.baseUrl).origin;
+                      setHeadersEnvironment({
+                        ...profilesEnvironment,
+                        baseOrigin,
+                      });
+                      setProfilesEnvironment(null);
+                      setEditingHeaderId(null);
+                      setHeaderForm(emptyHeaderForm(baseOrigin));
+                    }}
+                  >
+                    <Braces className="mr-2 h-4 w-4" />
+                    Legacy headers
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {profileForm.mode === 'advanced' &&
+              (
+                [
+                  [
+                    'Variables',
+                    'variableIds',
+                    profileVariables,
+                    (item: (typeof profileVariables)[number]) => item.key,
+                  ],
+                  [
+                    'Cookies',
+                    'cookieIds',
+                    profileCookies,
+                    (item: (typeof profileCookies)[number]) => item.name,
+                  ],
+                  [
+                    'Headers',
+                    'headerIds',
+                    profileHeaders,
+                    (item: (typeof profileHeaders)[number]) =>
+                      `${item.name} · ${item.origin}`,
+                  ],
+                ] as const
+              ).map(([title, field, items, labelFor]) => (
+                <div key={field} className="grid gap-2 rounded-md border p-3">
+                  <div className="text-sm font-medium">{title}</div>
+                  {items.length ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {items.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <Checkbox
+                            checked={profileForm[field].includes(item.id)}
+                            disabled={
+                              field !== 'variableIds' &&
+                              editingProfileIsAnonymous
+                            }
+                            onCheckedChange={(checked) =>
+                              toggleProfileBinding(
+                                field,
+                                item.id,
+                                checked === true,
+                              )
+                            }
+                          />
+                          <span className="truncate">
+                            {labelFor(item as never)}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No {title.toLowerCase()} configured.
+                    </p>
+                  )}
+                </div>
+              ))}
 
             <div className="flex justify-end gap-2">
               {editingProfileId && (
@@ -824,19 +954,76 @@ export function EnvironmentsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{profile.name}</span>
-                    {profile.isAnonymous && <Badge>Anonymous</Badge>}
+                    {profile.isAnonymous && <Badge>Guest</Badge>}
+                    <Badge variant="outline">{profile.mode}</Badge>
+                    <Badge
+                      variant={
+                        profile.authenticationStatus === 'ready'
+                          ? 'default'
+                          : 'secondary'
+                      }
+                    >
+                      {profile.authenticationStatus.replace(/_/g, ' ')}
+                    </Badge>
                     {!profile.enabled && (
                       <Badge variant="secondary">Disabled</Badge>
                     )}
                     <Badge variant="outline">revision {profile.revision}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {profile.variableIds.length} variables ·{' '}
-                    {profile.cookieIds.length} cookies ·{' '}
-                    {profile.headerIds.length} headers
+                    {profile.description || 'No role description'} · revision{' '}
+                    {profile.revision}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Captured{' '}
+                    {profile.capturedAt
+                      ? new Date(profile.capturedAt).toLocaleString()
+                      : 'never'}{' '}
+                    · Verified{' '}
+                    {profile.verifiedAt
+                      ? new Date(profile.verifiedAt).toLocaleString()
+                      : 'never'}
                   </p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap justify-end gap-1">
+                  {!profile.isAnonymous && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCapturingProfile({
+                            id: profile.id,
+                            name: profile.name,
+                          });
+                          setCaptureError('');
+                        }}
+                      >
+                        {profile.hasStorageState ? (
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Upload className="mr-2 h-4 w-4" />
+                        )}
+                        {profile.hasStorageState
+                          ? 'Refresh session'
+                          : 'Capture session'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          verifyProfile.isPending ||
+                          (!profile.hasStorageState && profile.mode === 'basic')
+                        }
+                        onClick={() => verifyProfile.mutate({ id: profile.id })}
+                      >
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        Verify access
+                      </Button>
+                    </>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -846,6 +1033,8 @@ export function EnvironmentsPage() {
                       setEditingProfileIsAnonymous(profile.isAnonymous);
                       setProfileForm({
                         name: profile.name,
+                        description: profile.description ?? '',
+                        mode: profile.mode,
                         enabled: profile.enabled,
                         variableIds: profile.variableIds,
                         cookieIds: profile.cookieIds,
@@ -869,6 +1058,70 @@ export function EnvironmentsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={capturingProfile !== null}
+        onOpenChange={(open) => {
+          if (!open && !captureProfileSession.isPending) {
+            setCapturingProfile(null);
+            setCaptureError('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Capture {capturingProfile?.name} authenticated session
+            </DialogTitle>
+            <DialogDescription>
+              Sign in through Playwright&apos;s controlled browser, close it,
+              then import the generated storage-state file. Probe encrypts the
+              state immediately and never displays its saved values.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <ol className="list-decimal space-y-2 pl-5 text-sm">
+              <li>Run this command on a trusted machine with Playwright.</li>
+              <li>Complete sign-in in the browser window that opens.</li>
+              <li>Close the browser, then select the generated JSON file.</li>
+            </ol>
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
+              <code>
+                {profilesEnvironment
+                  ? `npx playwright codegen --save-storage=probe-session.json ${shellQuote(
+                      (environments ?? []).find(
+                        ({ id }) => id === profilesEnvironment.id,
+                      )?.baseUrl ?? '',
+                    )}`
+                  : ''}
+              </code>
+            </pre>
+            <div className="rounded-md border p-3 text-xs text-muted-foreground">
+              The saved session keeps its real server and token lifetime.
+              Capturing it does not extend expiration.
+            </div>
+            <Label className="grid cursor-pointer gap-2 rounded-md border border-dashed p-5 text-center hover:bg-muted/50">
+              <Upload className="mx-auto h-5 w-5" />
+              <span>
+                {captureProfileSession.isPending
+                  ? 'Encrypting session…'
+                  : 'Select probe-session.json'}
+              </span>
+              <Input
+                className="sr-only"
+                type="file"
+                accept="application/json,.json"
+                disabled={captureProfileSession.isPending}
+                onChange={importCapturedSession}
+              />
+            </Label>
+            {captureError && (
+              <p className="text-sm text-destructive">{captureError}</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

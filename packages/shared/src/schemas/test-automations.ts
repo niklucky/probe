@@ -2,12 +2,14 @@ import { testAutomations } from '@probe/db';
 import { createSelectSchema } from 'drizzle-zod';
 import { z } from 'zod';
 import { aiConnectionReferenceSchema } from './ai-authoring';
+import { testStartingStateSchema } from './environments';
 
 export const generateTestAutomationInputSchema = z.object({
   testCaseId: z.number().int().positive(),
   sourceTestCaseVersionId: z.number().int().positive(),
   environmentId: z.number().int().positive(),
   environmentProfileId: z.number().int().positive(),
+  startingState: testStartingStateSchema.optional(),
   connectionId: aiConnectionReferenceSchema.optional(),
 });
 
@@ -15,6 +17,8 @@ export const acceptTestAutomationInputSchema = z.object({
   id: z.number().int().positive(),
   source: z.string().trim().min(1).max(500_000),
 });
+
+export const reviseTestAutomationInputSchema = acceptTestAutomationInputSchema;
 
 export const testAutomationIdInputSchema = z.object({
   id: z.number().int().positive(),
@@ -33,6 +37,7 @@ export const testAutomationSchema = createSelectSchema(testAutomations)
     environmentProfileId: true,
     environmentProfileName: true,
     environmentProfileRevision: true,
+    startingState: true,
     versionNumber: true,
     framework: true,
     language: true,

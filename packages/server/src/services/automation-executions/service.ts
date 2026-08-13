@@ -55,6 +55,9 @@ export function createAutomationExecutionService(
       if (!automation) throw new NotFoundError('Automation not found');
       const projectId = automation.testCase.suite.product.projectId;
       await authorization.requireProject(userId, projectId, 'execute');
+      if (input.captureDiagnostics) {
+        await authorization.requireProject(userId, projectId, 'author');
+      }
       if (automation.status !== 'accepted') {
         throw new ConflictError('Only accepted automation can be executed');
       }
@@ -63,18 +66,19 @@ export function createAutomationExecutionService(
         automation.environmentProfileRevision === null
       ) {
         throw new ConflictError(
-          'Automation has no environment profile snapshot and must be regenerated',
+          'Automation has no test profile snapshot and must be regenerated',
         );
       }
       if (input.environmentProfileId !== automation.environmentProfileId) {
         throw new ConflictError(
-          'Automation must be executed with the environment profile it was generated against',
+          'Automation must be executed with the test profile it was generated against',
         );
       }
       const profile = await environments.getEnabledProfile(
         input.environmentProfileId,
         automation.environmentId,
         userId,
+        automation.startingState,
       );
       if (profile.revision !== automation.environmentProfileRevision) {
         throw new ConflictError(
@@ -109,10 +113,12 @@ export function createAutomationExecutionService(
         environmentProfileId: profile.id,
         environmentProfileName: profile.name,
         environmentProfileRevision: profile.revision,
+        startingState: automation.startingState,
         requestedById: userId,
         timeoutSeconds: input.timeoutSeconds,
         settings: {
           browser: 'chromium',
+          captureDiagnostics: input.captureDiagnostics,
           captureVideo: input.captureVideo,
           applyEnvironmentCookies: input.applyEnvironmentCookies,
           applyEnvironmentHeaders: input.applyEnvironmentHeaders,
@@ -168,7 +174,11 @@ export function createAutomationExecutionService(
     async getArtifactUrl(jobId: number, artifactId: number, userId: number) {
       const job = await repository.find(jobId);
       if (!job) throw new NotFoundError('Execution not found');
-      await authorization.requireProject(userId, job.projectId, 'read');
+      await authorization.requireProject(
+        userId,
+        job.projectId,
+        job.settings.captureDiagnostics ? 'author' : 'read',
+      );
       const artifact = await repository.findArtifact(artifactId, jobId);
       if (!artifact || artifact.expiresAt <= new Date()) {
         throw new NotFoundError('Artifact not found or expired');

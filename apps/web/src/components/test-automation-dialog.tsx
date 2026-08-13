@@ -65,13 +65,19 @@ export function TestAutomationDialog({
   const [isSourceReady, setIsSourceReady] = useState(canGenerate);
   const [environmentId, setEnvironmentId] = useState("");
   const [environmentProfileId, setEnvironmentProfileId] = useState("");
+  const [startingState, setStartingState] = useState<
+    "profile_authentication" | "signed_out"
+  >("profile_authentication");
   const [connectionId, setConnectionId] = useState("");
   const [proposalId, setProposalId] = useState<number | null>(null);
   const [source, setSource] = useState("");
+  const [proposalCaptureDiagnostics, setProposalCaptureDiagnostics] =
+    useState(false);
   const [error, setError] = useState("");
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
   >(null);
+  const [selectedSource, setSelectedSource] = useState("");
   const [browserAssisted, setBrowserAssisted] = useState(false);
   const [manualTest, setManualTest] =
     useState<EditableManualTest>(initialManualTest);
@@ -147,8 +153,10 @@ export function TestAutomationDialog({
     if (!open) {
       setProposalId(null);
       setSource("");
+      setProposalCaptureDiagnostics(false);
       setError("");
       setSelectedAutomationId(null);
+      setSelectedSource("");
       setAuthoringSessionId(null);
       invalidatedAutomationId.current = null;
     }
@@ -186,6 +194,7 @@ export function TestAutomationDialog({
       invalidatedAutomationId.current = null;
       setProposalId(automation.id);
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setSource(automation.source);
     }
   }, [authoringSession, automations, testCaseId, utils.testAutomations.list]);
@@ -195,6 +204,7 @@ export function TestAutomationDialog({
       setProposalId(automation.id);
       setSource(automation.source);
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
@@ -205,8 +215,16 @@ export function TestAutomationDialog({
       setProposalId(null);
       setSource("");
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
+    },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const runProposal = trpc.automationExecutions.queue.useMutation({
+    onSuccess: ({ automationId }) => {
+      setError("");
+      utils.automationExecutions.list.invalidate({ automationId });
     },
     onError: (requestError) => setError(requestError.message),
   });
@@ -284,6 +302,7 @@ export function TestAutomationDialog({
   const busy =
     generate.isPending ||
     accept.isPending ||
+    runProposal.isPending ||
     discard.isPending ||
     markSourceReady.isPending ||
     startBrowserAuthoring.isPending ||
@@ -302,6 +321,7 @@ export function TestAutomationDialog({
         sourceTestCaseVersionId: sourceVersionId,
         environmentId: Number(environmentId),
         environmentProfileId: Number(environmentProfileId),
+        startingState,
         connectionId: selectedConnection,
       });
       return;
@@ -311,8 +331,36 @@ export function TestAutomationDialog({
       sourceTestCaseVersionId: sourceVersionId,
       environmentId: Number(environmentId),
       environmentProfileId: Number(environmentProfileId),
+      startingState,
       connectionId: selectedConnection,
     });
+  };
+
+  const acceptAndRun = () => {
+    if (!proposalId || !source.trim()) return;
+    setError("");
+    accept.mutate(
+      { id: proposalId, source },
+      {
+        onSuccess: (automation) => {
+          if (!automation.environmentProfileId) {
+            setError(
+              "Automation has no test profile; regenerate it before running.",
+            );
+            return;
+          }
+          runProposal.mutate({
+            automationId: automation.id,
+            environmentProfileId: automation.environmentProfileId,
+            timeoutSeconds: 300,
+            captureDiagnostics: proposalCaptureDiagnostics,
+            captureVideo: false,
+            applyEnvironmentCookies: true,
+            applyEnvironmentHeaders: true,
+          });
+        },
+      },
+    );
   };
 
   const manualTestDirty =
@@ -429,7 +477,7 @@ export function TestAutomationDialog({
               </Alert>
             )}
 
-            <div className="grid gap-4 xl:grid-cols-3">
+            <div className="grid gap-4 xl:grid-cols-4">
               <div className="grid min-w-0 gap-2">
                 <Label htmlFor="automation-environment">Environment</Label>
                 <Select
@@ -448,7 +496,7 @@ export function TestAutomationDialog({
                 </Select>
               </div>
               <div className="grid min-w-0 gap-2">
-                <Label htmlFor="automation-profile">Browser profile</Label>
+                <Label htmlFor="automation-profile">Test profile</Label>
                 <Select
                   id="automation-profile"
                   className="min-w-0"
@@ -463,13 +511,43 @@ export function TestAutomationDialog({
                     <option
                       key={profile.id}
                       value={profile.id}
-                      disabled={!profile.enabled}
+                      disabled={
+                        !profile.enabled ||
+                        (startingState === "profile_authentication" &&
+                          !profile.isAnonymous &&
+                          profile.authenticationStatus !== "ready")
+                      }
                     >
                       {profile.name}
-                      {profile.isAnonymous ? " (no authentication)" : ""}
+                      {profile.isAnonymous ? " (Guest)" : ""}
+                      {profile.authenticationStatus !== "ready"
+                        ? ` (${profile.authenticationStatus.replace(/_/g, " ")})`
+                        : ""}
                       {!profile.enabled ? " (disabled)" : ""}
                     </option>
                   ))}
+                </Select>
+              </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="automation-starting-state">
+                  Starting state
+                </Label>
+                <Select
+                  id="automation-starting-state"
+                  className="min-w-0"
+                  value={startingState}
+                  onChange={(event) => {
+                    setStartingState(
+                      event.target.value as
+                        "profile_authentication" | "signed_out",
+                    );
+                    setEnvironmentProfileId("");
+                  }}
+                >
+                  <option value="profile_authentication">
+                    Use profile authentication
+                  </option>
+                  <option value="signed_out">Start signed out</option>
                 </Select>
               </div>
               <div className="grid min-w-0 gap-2">
@@ -542,7 +620,35 @@ export function TestAutomationDialog({
                   onChange={(event) => setSource(event.target.value)}
                   spellCheck={false}
                 />
-                <div className="flex flex-wrap justify-end gap-2">
+                <label className="flex items-start gap-3 rounded-md border p-3">
+                  <Checkbox
+                    checked={proposalCaptureDiagnostics}
+                    onCheckedChange={(checked) =>
+                      setProposalCaptureDiagnostics(checked === true)
+                    }
+                  />
+                  <span className="grid gap-1">
+                    <span className="text-sm font-medium">
+                      Capture visual diagnostics on failure
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      Save a Playwright trace and failure screenshot for this
+                      first run.
+                    </span>
+                  </span>
+                </label>
+                {proposalCaptureDiagnostics && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Sensitive visual artifacts enabled</AlertTitle>
+                    <AlertDescription>
+                      Screenshots and traces may contain page data or entered
+                      values. Downloads are restricted to automation authors
+                      and use expiring links.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -552,30 +658,51 @@ export function TestAutomationDialog({
                     <Trash2 className="mr-2 h-4 w-4" />
                     Discard
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      busy ||
-                      manualTestDirty ||
-                      !environmentId ||
-                      !environmentProfileId ||
-                      !isSourceReady
-                    }
-                    onClick={() => requestGeneration()}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Regenerate
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={busy || !source.trim()}
-                    onClick={() => accept.mutate({ id: proposalId, source })}
-                  >
-                    <Check className="mr-2 h-4 w-4" />
-                    Accept
-                  </Button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={
+                        busy ||
+                        manualTestDirty ||
+                        !environmentId ||
+                        !environmentProfileId ||
+                        !isSourceReady
+                      }
+                      onClick={() => requestGeneration()}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Regenerate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy || !source.trim()}
+                      onClick={() =>
+                        accept.mutate({ id: proposalId, source })
+                      }
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      Accept
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy || !source.trim()}
+                      onClick={acceptAndRun}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      {accept.isPending
+                        ? "Accepting…"
+                        : runProposal.isPending
+                          ? "Queuing…"
+                          : "Run test"}
+                    </Button>
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Run test accepts the current source and queues it with the
+                  captured test profile. Use execution history to run it again.
+                </p>
               </div>
             ) : (
               <Button
@@ -613,6 +740,7 @@ export function TestAutomationDialog({
                     }`}
                     onClick={() => {
                       setSelectedAutomationId(automation.id);
+                      setSelectedSource(automation.source);
                       if (automation.status === "generated") {
                         setProposalId(automation.id);
                         setSource(automation.source);
@@ -658,17 +786,35 @@ export function TestAutomationDialog({
                       <Label
                         htmlFor={`automation-source-${selectedAutomation.id}`}
                       >
-                        Automation v{selectedAutomation.versionNumber} source
+                        Automation v{selectedAutomation.versionNumber} working
+                        copy
                       </Label>
-                      <Badge variant="outline">Read only</Badge>
+                      <Badge variant="outline">
+                        {selectedAutomation.status !== "accepted"
+                          ? "Read only"
+                          : selectedSource !== selectedAutomation.source
+                            ? "Unsaved edits"
+                            : "Editable"}
+                      </Badge>
                     </div>
                     <Textarea
                       id={`automation-source-${selectedAutomation.id}`}
                       className="min-h-[360px] bg-background font-mono text-xs"
-                      value={selectedAutomation.source}
-                      readOnly
+                      value={
+                        selectedAutomation.status === "accepted"
+                          ? selectedSource
+                          : selectedAutomation.source
+                      }
+                      onChange={(event) => setSelectedSource(event.target.value)}
+                      readOnly={selectedAutomation.status !== "accepted"}
                       spellCheck={false}
                     />
+                    {selectedAutomation.status === "accepted" && (
+                      <p className="text-xs text-muted-foreground">
+                        Edited source is validated and saved as a new automation
+                        version when you run the test.
+                      </p>
+                    )}
                   </div>
                 )}
               {selectedAutomation?.status === "accepted" && (
@@ -679,6 +825,13 @@ export function TestAutomationDialog({
                   preferredProfileRevision={
                     selectedAutomation.environmentProfileRevision
                   }
+                  source={selectedSource}
+                  originalSource={selectedAutomation.source}
+                  onRevisionCreated={(automation) => {
+                    setSelectedAutomationId(automation.id);
+                    setSelectedSource(automation.source);
+                    utils.testAutomations.list.invalidate({ testCaseId });
+                  }}
                 />
               )}
             </div>
@@ -1039,13 +1192,23 @@ function AutomationExecutionHistory({
   environmentId,
   preferredProfileId,
   preferredProfileRevision,
+  source,
+  originalSource,
+  onRevisionCreated,
 }: {
   automationId: number;
   environmentId: number;
   preferredProfileId: number | null;
   preferredProfileRevision: number | null;
+  source: string;
+  originalSource: string;
+  onRevisionCreated: (automation: {
+    id: number;
+    source: string;
+  }) => void;
 }) {
   const [error, setError] = useState("");
+  const [captureDiagnostics, setCaptureDiagnostics] = useState(false);
   const [captureVideo, setCaptureVideo] = useState(false);
   const [applyEnvironmentCookies, setApplyEnvironmentCookies] = useState(true);
   const [applyEnvironmentHeaders, setApplyEnvironmentHeaders] = useState(true);
@@ -1063,10 +1226,15 @@ function AutomationExecutionHistory({
     setProfileId(preferredProfileId ? String(preferredProfileId) : "");
   }, [automationId, preferredProfileId]);
   const queue = trpc.automationExecutions.queue.useMutation({
-    onSuccess: () => {
+    onSuccess: ({ automationId: queuedAutomationId }) => {
       setError("");
-      utils.automationExecutions.list.invalidate({ automationId });
+      utils.automationExecutions.list.invalidate({
+        automationId: queuedAutomationId,
+      });
     },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const revise = trpc.testAutomations.revise.useMutation({
     onError: (requestError) => setError(requestError.message),
   });
   const cancel = trpc.automationExecutions.cancel.useMutation({
@@ -1086,6 +1254,42 @@ function AutomationExecutionHistory({
     selectedProfile.id === preferredProfileId &&
     selectedProfile.revision === preferredProfileRevision,
   );
+  const sourceChanged = source !== originalSource;
+  const queueRun = (
+    queuedAutomationId: number,
+    queuedEnvironmentProfileId: number,
+  ) =>
+    queue.mutate({
+      automationId: queuedAutomationId,
+      environmentProfileId: queuedEnvironmentProfileId,
+      timeoutSeconds: 300,
+      captureDiagnostics,
+      captureVideo,
+      applyEnvironmentCookies,
+      applyEnvironmentHeaders,
+    });
+  const run = () => {
+    setError("");
+    if (!sourceChanged) {
+      queueRun(automationId, Number(profileId));
+      return;
+    }
+    revise.mutate(
+      { id: automationId, source },
+      {
+        onSuccess: (automation) => {
+          if (!automation.environmentProfileId) {
+            setError(
+              "Automation has no test profile; regenerate it before running.",
+            );
+            return;
+          }
+          onRevisionCreated(automation);
+          queueRun(automation.id, automation.environmentProfileId);
+        },
+      },
+    );
+  };
 
   return (
     <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
@@ -1098,7 +1302,7 @@ function AutomationExecutionHistory({
         </div>
         <div className="flex items-center gap-3">
           <select
-            aria-label="Execution browser profile"
+            aria-label="Execution test profile"
             className="flex h-8 rounded-md border border-input bg-background px-2 text-xs"
             value={profileId}
             onChange={(event) => setProfileId(event.target.value)}
@@ -1123,6 +1327,16 @@ function AutomationExecutionHistory({
               </option>
             ))}
           </select>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={captureDiagnostics}
+              onChange={(event) =>
+                setCaptureDiagnostics(event.target.checked)
+              }
+            />
+            Visual diagnostics
+          </label>
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
@@ -1153,26 +1367,37 @@ function AutomationExecutionHistory({
           </label>
           <Button
             size="sm"
-            disabled={queue.isPending || !hasRunnableProfile}
-            onClick={() =>
-              queue.mutate({
-                automationId,
-                environmentProfileId: Number(profileId),
-                timeoutSeconds: 300,
-                captureVideo,
-                applyEnvironmentCookies,
-                applyEnvironmentHeaders,
-              })
+            disabled={
+              queue.isPending ||
+              revise.isPending ||
+              !hasRunnableProfile ||
+              !source.trim()
             }
+            onClick={run}
           >
             <Play className="mr-2 h-4 w-4" />
-            {queue.isPending ? "Queuing…" : "Run accepted version"}
+            {revise.isPending
+              ? "Saving…"
+              : queue.isPending
+                ? "Queuing…"
+                : "Run test"}
           </Button>
         </div>
       </div>
+      {captureDiagnostics && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Sensitive visual artifacts enabled</AlertTitle>
+          <AlertDescription>
+            Failure screenshots and traces may contain page data or values
+            entered during the test. Access remains restricted to automation
+            authors through expiring download links.
+          </AlertDescription>
+        </Alert>
+      )}
       {!profilesLoading && !hasRunnableProfile && (
         <p className="text-sm text-destructive">
-          The automation&apos;s environment profile was deleted, disabled, or
+          The automation&apos;s test profile was deleted, disabled, or
           changed. Regenerate the automation before running it.
         </p>
       )}

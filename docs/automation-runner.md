@@ -65,8 +65,11 @@ Docker by environment-variable _name_. Unrelated environment variables are not
 loaded or injected. Values are never persisted in source, job rows, or process
 arguments.
 Logs and errors are redacted. Trace, screenshot, and video capture is disabled
-for executions with runtime secrets because browser artifacts can contain DOM
-and input values.
+by default for executions with runtime secrets because browser artifacts can
+contain DOM and input values. An author can explicitly enable visual
+diagnostics for a run; those sensitive failure artifacts use the same private
+bucket, authorization checks, expiring download URLs, and retention policy as
+other execution artifacts.
 
 Environment header templates are resolved during runner preflight and passed to
 the container through inherited process environment only. The Playwright hook

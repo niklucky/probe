@@ -4,6 +4,7 @@ import {
   createEnvironmentHeaderInputSchema,
   createEnvironmentVariableInputSchema,
   createEnvironmentProfileInputSchema,
+  captureEnvironmentProfileSessionInputSchema,
   environmentIdInputSchema,
   environmentCookieIdInputSchema,
   environmentCookieSchema,
@@ -24,6 +25,7 @@ import {
   updateEnvironmentHeaderInputSchema,
   updateEnvironmentVariableInputSchema,
   updateEnvironmentProfileInputSchema,
+  verifyEnvironmentProfileInputSchema,
 } from '@probe/shared/schemas/environments';
 import { z } from 'zod';
 import { protectedProcedure, router } from '../../../trpc';
@@ -70,6 +72,18 @@ export const environmentsRouter = router({
     .output(environmentProfileSchema)
     .mutation(({ ctx, input }) =>
       ctx.services.environments.updateProfile(input, ctx.user.id),
+    ),
+  captureProfileSession: protectedProcedure
+    .input(captureEnvironmentProfileSessionInputSchema)
+    .output(environmentProfileSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.captureProfileSession(input, ctx.user.id),
+    ),
+  verifyProfile: protectedProcedure
+    .input(verifyEnvironmentProfileInputSchema)
+    .output(environmentProfileSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.environments.verifyProfile(input, ctx.user.id),
     ),
   deleteProfile: protectedProcedure
     .input(environmentProfileIdInputSchema)
