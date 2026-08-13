@@ -75,6 +75,7 @@ export function TestAutomationDialog({
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     number | null
   >(null);
+  const [selectedSource, setSelectedSource] = useState("");
   const [browserAssisted, setBrowserAssisted] = useState(false);
   const [manualTest, setManualTest] =
     useState<EditableManualTest>(initialManualTest);
@@ -152,6 +153,7 @@ export function TestAutomationDialog({
       setSource("");
       setError("");
       setSelectedAutomationId(null);
+      setSelectedSource("");
       setAuthoringSessionId(null);
       invalidatedAutomationId.current = null;
     }
@@ -189,6 +191,7 @@ export function TestAutomationDialog({
       invalidatedAutomationId.current = null;
       setProposalId(automation.id);
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setSource(automation.source);
     }
   }, [authoringSession, automations, testCaseId, utils.testAutomations.list]);
@@ -198,6 +201,7 @@ export function TestAutomationDialog({
       setProposalId(automation.id);
       setSource(automation.source);
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
@@ -208,6 +212,7 @@ export function TestAutomationDialog({
       setProposalId(null);
       setSource("");
       setSelectedAutomationId(automation.id);
+      setSelectedSource(automation.source);
       setError("");
       utils.testAutomations.list.invalidate({ testCaseId });
     },
@@ -703,6 +708,7 @@ export function TestAutomationDialog({
                     }`}
                     onClick={() => {
                       setSelectedAutomationId(automation.id);
+                      setSelectedSource(automation.source);
                       if (automation.status === "generated") {
                         setProposalId(automation.id);
                         setSource(automation.source);
@@ -748,17 +754,35 @@ export function TestAutomationDialog({
                       <Label
                         htmlFor={`automation-source-${selectedAutomation.id}`}
                       >
-                        Automation v{selectedAutomation.versionNumber} source
+                        Automation v{selectedAutomation.versionNumber} working
+                        copy
                       </Label>
-                      <Badge variant="outline">Read only</Badge>
+                      <Badge variant="outline">
+                        {selectedAutomation.status !== "accepted"
+                          ? "Read only"
+                          : selectedSource !== selectedAutomation.source
+                            ? "Unsaved edits"
+                            : "Editable"}
+                      </Badge>
                     </div>
                     <Textarea
                       id={`automation-source-${selectedAutomation.id}`}
                       className="min-h-[360px] bg-background font-mono text-xs"
-                      value={selectedAutomation.source}
-                      readOnly
+                      value={
+                        selectedAutomation.status === "accepted"
+                          ? selectedSource
+                          : selectedAutomation.source
+                      }
+                      onChange={(event) => setSelectedSource(event.target.value)}
+                      readOnly={selectedAutomation.status !== "accepted"}
                       spellCheck={false}
                     />
+                    {selectedAutomation.status === "accepted" && (
+                      <p className="text-xs text-muted-foreground">
+                        Edited source is validated and saved as a new automation
+                        version when you run the test.
+                      </p>
+                    )}
                   </div>
                 )}
               {selectedAutomation?.status === "accepted" && (
@@ -769,6 +793,13 @@ export function TestAutomationDialog({
                   preferredProfileRevision={
                     selectedAutomation.environmentProfileRevision
                   }
+                  source={selectedSource}
+                  originalSource={selectedAutomation.source}
+                  onRevisionCreated={(automation) => {
+                    setSelectedAutomationId(automation.id);
+                    setSelectedSource(automation.source);
+                    utils.testAutomations.list.invalidate({ testCaseId });
+                  }}
                 />
               )}
             </div>
@@ -1129,11 +1160,20 @@ function AutomationExecutionHistory({
   environmentId,
   preferredProfileId,
   preferredProfileRevision,
+  source,
+  originalSource,
+  onRevisionCreated,
 }: {
   automationId: number;
   environmentId: number;
   preferredProfileId: number | null;
   preferredProfileRevision: number | null;
+  source: string;
+  originalSource: string;
+  onRevisionCreated: (automation: {
+    id: number;
+    source: string;
+  }) => void;
 }) {
   const [error, setError] = useState("");
   const [captureVideo, setCaptureVideo] = useState(false);
@@ -1153,10 +1193,15 @@ function AutomationExecutionHistory({
     setProfileId(preferredProfileId ? String(preferredProfileId) : "");
   }, [automationId, preferredProfileId]);
   const queue = trpc.automationExecutions.queue.useMutation({
-    onSuccess: () => {
+    onSuccess: ({ automationId: queuedAutomationId }) => {
       setError("");
-      utils.automationExecutions.list.invalidate({ automationId });
+      utils.automationExecutions.list.invalidate({
+        automationId: queuedAutomationId,
+      });
     },
+    onError: (requestError) => setError(requestError.message),
+  });
+  const revise = trpc.testAutomations.revise.useMutation({
     onError: (requestError) => setError(requestError.message),
   });
   const cancel = trpc.automationExecutions.cancel.useMutation({
@@ -1176,6 +1221,41 @@ function AutomationExecutionHistory({
     selectedProfile.id === preferredProfileId &&
     selectedProfile.revision === preferredProfileRevision,
   );
+  const sourceChanged = source !== originalSource;
+  const queueRun = (
+    queuedAutomationId: number,
+    queuedEnvironmentProfileId: number,
+  ) =>
+    queue.mutate({
+      automationId: queuedAutomationId,
+      environmentProfileId: queuedEnvironmentProfileId,
+      timeoutSeconds: 300,
+      captureVideo,
+      applyEnvironmentCookies,
+      applyEnvironmentHeaders,
+    });
+  const run = () => {
+    setError("");
+    if (!sourceChanged) {
+      queueRun(automationId, Number(profileId));
+      return;
+    }
+    revise.mutate(
+      { id: automationId, source },
+      {
+        onSuccess: (automation) => {
+          if (!automation.environmentProfileId) {
+            setError(
+              "Automation has no test profile; regenerate it before running.",
+            );
+            return;
+          }
+          onRevisionCreated(automation);
+          queueRun(automation.id, automation.environmentProfileId);
+        },
+      },
+    );
+  };
 
   return (
     <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
@@ -1243,20 +1323,20 @@ function AutomationExecutionHistory({
           </label>
           <Button
             size="sm"
-            disabled={queue.isPending || !hasRunnableProfile}
-            onClick={() =>
-              queue.mutate({
-                automationId,
-                environmentProfileId: Number(profileId),
-                timeoutSeconds: 300,
-                captureVideo,
-                applyEnvironmentCookies,
-                applyEnvironmentHeaders,
-              })
+            disabled={
+              queue.isPending ||
+              revise.isPending ||
+              !hasRunnableProfile ||
+              !source.trim()
             }
+            onClick={run}
           >
             <Play className="mr-2 h-4 w-4" />
-            {queue.isPending ? "Queuing…" : "Run test"}
+            {revise.isPending
+              ? "Saving…"
+              : queue.isPending
+                ? "Queuing…"
+                : "Run test"}
           </Button>
         </div>
       </div>

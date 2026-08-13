@@ -18,6 +18,8 @@ export const acceptTestAutomationInputSchema = z.object({
   source: z.string().trim().min(1).max(500_000),
 });
 
+export const reviseTestAutomationInputSchema = acceptTestAutomationInputSchema;
+
 export const testAutomationIdInputSchema = z.object({
   id: z.number().int().positive(),
 });

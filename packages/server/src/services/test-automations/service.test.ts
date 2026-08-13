@@ -86,6 +86,7 @@ function automation(overrides: Record<string, unknown> = {}) {
     environmentProfileId: 6,
     environmentProfileName: 'Authenticated User',
     environmentProfileRevision: 3,
+    startingState: 'profile_authentication' as const,
     versionNumber: 1,
     framework: 'playwright' as const,
     language: 'typescript' as const,
@@ -425,5 +426,63 @@ describe('Playwright automation generation', () => {
       code: 'NOT_FOUND',
     });
     expect(accepted).toBe(false);
+  });
+
+  test('saves edited accepted source as a new immutable version', async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const repository = {
+      async find() {
+        return {
+          ...automation({ status: 'accepted' }),
+          testCase,
+          environment,
+          environmentProfile: profile,
+          sourceTestCaseVersion: sourceVersion,
+        };
+      },
+      async nextVersion() {
+        return 2;
+      },
+      async create(values: Record<string, unknown>) {
+        writes.push(values);
+        return automation({ ...values, id: 21 });
+      },
+      async withTransaction(operation: (repo: unknown) => Promise<unknown>) {
+        return operation(repository);
+      },
+    };
+    const service = createTestAutomationService(
+      repository as never,
+      { async require() {} } as never,
+      {} as never,
+      {
+        async getEnabledProfile() {
+          return profile;
+        },
+        async listProfileVariableMetadata() {
+          return [
+            { key: 'username', description: null, isSecret: false },
+            { key: 'password', description: null, isSecret: true },
+          ];
+        },
+      } as never,
+    );
+
+    const result = await service.revise(
+      20,
+      generatedSource.replace('Dashboard', 'Account'),
+      2,
+    );
+
+    expect(writes[0]).toMatchObject({
+      versionNumber: 2,
+      status: 'accepted',
+      createdById: 2,
+      acceptedById: 2,
+      environmentProfileRevision: 3,
+    });
+    expect(writes[0]?.source).toContain('Account');
+    expect(result.id).toBe(21);
+    expect(result.status).toBe('accepted');
   });
 });

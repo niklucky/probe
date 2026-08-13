@@ -2,6 +2,7 @@ import {
   acceptTestAutomationInputSchema,
   generateTestAutomationInputSchema,
   listTestAutomationsInputSchema,
+  reviseTestAutomationInputSchema,
   testAutomationIdInputSchema,
   testAutomationSchema,
 } from '@probe/shared/schemas/test-automations';
@@ -26,6 +27,12 @@ export const testAutomationsRouter = router({
     .output(testAutomationSchema)
     .mutation(({ ctx, input }) =>
       ctx.services.testAutomations.accept(input.id, input.source, ctx.user.id),
+    ),
+  revise: protectedProcedure
+    .input(reviseTestAutomationInputSchema)
+    .output(testAutomationSchema)
+    .mutation(({ ctx, input }) =>
+      ctx.services.testAutomations.revise(input.id, input.source, ctx.user.id),
     ),
   discard: protectedProcedure
     .input(testAutomationIdInputSchema)

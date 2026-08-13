@@ -352,6 +352,89 @@ export function createTestAutomationService(
       });
     },
 
+    async revise(id: number, source: string, userId: number) {
+      const automation = await repository.find(id);
+      if (!automation) throw new NotFoundError('Automation not found');
+      await authorization.require(
+        userId,
+        { type: 'case', id: automation.testCaseId },
+        'author',
+      );
+      if (automation.status !== 'accepted') {
+        throw new ConflictError('Only accepted automation can be revised');
+      }
+      if (!automation.environmentProfileId) {
+        throw new ConflictError(
+          'Automation has no test profile; regenerate it before revising',
+        );
+      }
+      const profile = await environments.getEnabledProfile(
+        automation.environmentProfileId,
+        automation.environmentId,
+        userId,
+        automation.startingState,
+      );
+      if (profile.revision !== automation.environmentProfileRevision) {
+        throw new ConflictError(
+          'Environment profile changed; regenerate the automation',
+        );
+      }
+      const variableMetadata = await environments.listProfileVariableMetadata(
+        profile.id,
+        userId,
+      );
+      const requiredVariables = extractEnvironmentVariableReferencesFromValue({
+        title: automation.sourceTestCaseVersion.title,
+        description: automation.sourceTestCaseVersion.description,
+        prerequisites: automation.sourceTestCaseVersion.prerequisites,
+        steps: automation.sourceTestCaseVersion.steps,
+        expectedResult: automation.sourceTestCaseVersion.expectedResult,
+        tags: automation.sourceTestCaseVersion.tags,
+      });
+      const formatted = await validateAndFormatAutomationSource(source, {
+        allowed: variableMetadata.map(({ key }) => key),
+        required: requiredVariables,
+      });
+      const revised = await repository.withTransaction(
+        async (transactionRepository) => {
+          const versionNumber = await transactionRepository.nextVersion(
+            automation.testCaseId,
+          );
+          const now = new Date();
+          return transactionRepository.create({
+            testCaseId: automation.testCaseId,
+            sourceTestCaseVersionId: automation.sourceTestCaseVersionId,
+            environmentId: automation.environmentId,
+            environmentProfileId: profile.id,
+            environmentProfileName: profile.name,
+            environmentProfileRevision: profile.revision,
+            startingState: automation.startingState,
+            versionNumber,
+            framework: automation.framework,
+            language: automation.language,
+            status: 'accepted',
+            source: formatted,
+            connectionRef: automation.connectionRef,
+            provider: automation.provider,
+            model: automation.model,
+            promptVersion: automation.promptVersion,
+            createdById: userId,
+            acceptedById: userId,
+            createdAt: now,
+            updatedAt: now,
+            acceptedAt: now,
+          });
+        },
+      );
+      return publicAutomation({
+        ...revised,
+        testCase: automation.testCase,
+        environment: automation.environment,
+        environmentProfile: profile,
+        sourceTestCaseVersion: automation.sourceTestCaseVersion,
+      });
+    },
+
     async discard(id: number, userId: number) {
       const automation = await repository.find(id);
       if (!automation) throw new NotFoundError('Automation proposal not found');
